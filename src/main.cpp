@@ -238,9 +238,10 @@ Enum = setmetatable({ __type="Enums" }, { __metatable="The metatable is locked",
 end })
 
 -- type and typeof are registered as native C functions by Lumora's
--- registerRobloxGlobals so that anti-tamper checks which verify builtins
--- are C closures pass correctly. The C implementation reads the __type
--- marker that the Roblox prelude sets on emulated userdata objects.
+-- registerRobloxGlobals so that builtins behave as C closures, matching
+-- the contract that Roblox scripts expect. The C implementation reads
+-- the __type marker that the Roblox prelude sets on emulated userdata
+-- objects.
 
 local function vec2(x,y)
     return setmetatable({X=x or 0,Y=y or 0,__type="Vector2"}, {
@@ -1738,7 +1739,7 @@ function game:GetCoreGuiEnabled(gui) return true end
 // loadstring(source [, chunkName]) — mirrors the Roblox global. Compiles
 // Luau source to bytecode and loads it as a function. Returns (fn) on
 // success or (nil, errorMessage) on a compile error, matching the contract
-// that Fengetheus AntiTamper and general Roblox scripts rely on.
+// that general Roblox scripts rely on.
 static int lumora_loadstring(lua_State* L)
 {
     const char* source = luaL_optstring(L, 1, "");
@@ -1826,8 +1827,8 @@ static int lumora_newcclosure(lua_State* L)
 // clonefunction(f) -> function : returns a function with identical behaviour.
 // For C closures we return the same reference (they are immutable). For Lua
 // closures we also return the same reference — Luau does not expose a
-// bytecode-level clone, and identity is sufficient for anti-tamper checks
-// that verify clonefunction(pcall) still works.
+// bytecode-level clone, and identity is sufficient for the Roblox
+// compatibility contract that clonefunction(pcall) still works.
 static int lumora_clonefunction(lua_State* L)
 {
     luaL_checktype(L, 1, LUA_TFUNCTION);
@@ -1866,8 +1867,8 @@ static bool isRobloxValueType(const char* marker)
 // Roblox-aware type(v) -> string. Identical to native Luau type() except that
 // tables carrying a __type marker of "Instance", "Enums", "Enum", or
 // "EnumItem" report "userdata", matching what real Roblox returns for its
-// native objects. Implemented as a C closure so anti-tamper C-closure
-// verification passes.
+// native objects. Implemented as a C closure so that builtins behave
+// consistently with Roblox's own C-closure implementation.
 static int lumora_type(lua_State* L)
 {
     luaL_checkany(L, 1);
@@ -1966,8 +1967,8 @@ static void registerRobloxGlobals(lua_State* L)
     lua_pushcfunction(L, lumora_clonefunction, "clonefunction");
     lua_setglobal(L, "clonefunction");
 
-    // Roblox-aware type/typeof implemented as C closures so that anti-tamper
-    // checks verifying builtins are C closures pass correctly.
+    // Roblox-aware type/typeof implemented as C closures so that builtins
+    // behave consistently with Roblox's own C-closure implementation.
     lua_pushcfunction(L, lumora_type, "type");
     lua_setglobal(L, "type");
 

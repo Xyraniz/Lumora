@@ -11,7 +11,7 @@
 
 Lumora es un ejecutable autocontenido construido sobre los fuentes oficiales de [Luau](https://luau.org). Su objetivo es ofrecer una superficie de ejecución **headless, reproducible y automatizable** para scripts `.lua` y `.luau` que necesitan una capa compatible con patrones frecuentes de Roblox, sin depender de Roblox Studio, una ventana gráfica o un cliente del juego.
 
-El proyecto combina la VM y el compilador de Luau vendorizados en `vendor/luau` con un prelude aislado de compatibilidad Roblox. El resultado es una herramienta pequeña y directa para pruebas de regresión, validación de output generado, análisis de scripts y pipelines de CI. En particular, Lumora sirve como etapa de ejecución para [Fengetheus](https://github.com/Xyraniz/Fengetheus): recibe el archivo generado, prepara el entorno esperado y devuelve stdout, errores y código de salida de forma controlable.
+El proyecto combina la VM y el compilador de Luau vendorizados en `vendor/luau` con un prelude aislado de compatibilidad Roblox. El resultado es una herramienta pequeña y directa para pruebas de regresión, validación de output generado, análisis de scripts y pipelines de CI. Lumora es un proyecto independiente: cualquier herramienta o flujo que produzca archivos `.lua` o `.luau` puede consumirlo, sin acoplarse a un generador concreto.
 
 > **Lumora no es Roblox Studio ni un motor 3D.** Emula una superficie headless enfocada en ejecución y validación; no pretende renderizar experiencias, conectarse a servicios reales ni ejecutar un juego completo.
 
@@ -31,7 +31,7 @@ Los runtimes independientes de Luau suelen enfocarse en programación general o 
 
 Lumora acepta archivos `.lua` y `.luau` directamente, conserva la biblioteca estándar de Luau y soporta sintaxis moderna del compilador. La capa Roblox incluye jerarquías de instancias, servicios, atributos, señales, enumeraciones, tipos de datos y un scheduler cooperativo reducido. Las funciones que dependen de un cliente, una ventana o una red real se mantienen como stubs seguros o comportamientos headless explícitos.
 
-La salida normal conserva el stdout del script. Con `--json`, Lumora devuelve un objeto estructurado con el resultado de la ejecución, stdout, stderr, error y código de salida, lo que permite consumirlo desde Fengetheus, scripts de shell, runners de pruebas o herramientas escritas en otros lenguajes.
+La salida normal conserva el stdout del script. Con `--json`, Lumora devuelve un objeto estructurado con el resultado de la ejecución, stdout, stderr, error y código de salida, lo que permite consumirlo desde scripts de shell, runners de pruebas, pipelines de CI o herramientas escritas en otros lenguajes.
 
 ## Instalación y compilación
 
@@ -144,7 +144,7 @@ La tabla siguiente resume la API cubierta por el prelude actual. La compatibilid
 | Enumeraciones | `Enum.X.Y`, `Name`, `EnumType`, `FromName`, `FromValue` y `Value`. |
 | Tipos de datos | `typeof`, `Vector2`, `Vector3`, `UDim`, `UDim2`, `CFrame`, `Color3`, `BrickColor`, `Ray`, `RaycastParams`, `NumberRange`, `NumberSequence`, `ColorSequence`, `Font`, `Rect`, `Path2D` y `TweenInfo`. |
 | Scheduling | `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.wait`, además de los aliases globales habituales. |
-| Funciones de entorno | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv` y stubs de funciones de executor. |
+| Funciones de entorno | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv` y una capa de compatibilidad de executor (stubs seguros). |
 | Aleatoriedad | `Random.new(seed)`, `NextInteger`, `NextNumber`, `NextUnitVector` y `Clone`, con estado PCG32 determinista. |
 | Biblioteca Luau | Biblioteca estándar, `bit32`, `string.pack/unpack`, `buffer`, `utf8` y sintaxis moderna del compilador. |
 
@@ -191,11 +191,26 @@ El equivalente directo es:
 ctest --test-dir build --output-on-failure
 ```
 
-Las pruebas cubren argumentos y stdout, `--json`, timeouts, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta y baja de hijos, atributos, enumeraciones, tipos compatibles con las comprobaciones de Fengetheus, destrucción recursiva, llamadas con `:`, scheduling y cancelación básica.
+Las pruebas cubren argumentos y stdout, `--json`, timeouts, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta y baja de hijos, atributos, enumeraciones, fidelidad de tipos de datos (Vector2/3, CFrame, Color3, UDim2), herencia de clases con `IsA`, destrucción recursiva, llamadas con `:`, scheduling, cancelación básica, modo `--sandbox` y validación del esquema JSON con un parser real.
 
-## Relación con Fengetheus
+## Integración con otras herramientas
 
-[Fengetheus](https://github.com/Xyraniz/Fengetheus) genera archivos `.lua` o `.luau` y puede seleccionar Luau como destino. Lumora ocupa la etapa posterior: recibe el archivo generado, prepara un entorno compatible mínimo y produce un resultado reproducible para tests, validación de output y automatización. Esta separación mantiene a Fengetheus enfocado en generación y a Lumora enfocado en ejecución controlada.
+Lumora es un proyecto independiente y no pertenece a ningún generador de código en particular. Cualquier herramienta que produzca archivos `.lua` o `.luau` puede usar Lumora como etapa de ejecución: recibe el archivo, prepara un entorno compatible y produce un resultado reproducible para tests, validación de output y automatización. Por ejemplo, un generador de código como [Fengetheus](https://github.com/Xyraniz/Fengetheus) puede delegar la ejecución en Lumora, pero la integración es opcional y Lumora funciona igual de bien con scripts escritos a mano o generados por cualquier otra herramienta.
+
+## Modelo de seguridad
+
+Lumora ejecuta c\u00f3digo Luau con acceso a la biblioteca est\u00e1ndar completa y, por defecto, a globals adicionales como `loadstring` y la capa de compatibilidad de executor. **Lumora no es un sandbox de seguridad.** Est\u00e1 dise\u00f1ado para ejecutar scripts sobre los que se tiene control o confianza razonable dentro de un pipeline de CI o un flujo de validaci\u00f3n local. Para ejecutar c\u00f3digo no confiable o de origen desconocido, se debe usar un contenedor externo (Docker, namespaces de Linux, VM, etc.) que a\u00edsla el sistema de archivos, la red y los procesos.
+
+### Modo `--sandbox`
+
+El flag `--sandbox` reduce la superficie disponible para el script, \u00fatil cuando se procesan scripts semi-confiables dentro de un pipeline y se quiere fallar r\u00e1pido ante intentos de acceso a primitivas peligrosas. Concretamente, `--sandbox`:
+
+- Elimina `loadstring` y `load` (no se puede compilar c\u00f3digo arbitrario en tiempo de ejecuci\u00f3n).
+- Elimina las bibliotecas `os` e `io` (no hay acceso al sistema de archivos ni al entorno del proceso).
+- Elimina los hooks de executor y los stubs de filesystem del prelude.
+- Limita el scheduler cooperativo a 10 ciclos, acotando el trabajo que un script puede encolar.
+
+`--sandbox` no sustituye al aislamiento del sistema operativo: es una capa de reducci\u00f3n de superficie dentro del proceso, no una barrera de seguridad completa. El test `tests/sandbox_contract.sh` verifica que los globals peligrosos est\u00e9n ausentes en modo `--sandbox` y presentes en el modo normal.
 
 ## Alcance y no objetivos
 
@@ -214,4 +229,3 @@ Lumora se distribuye bajo la [licencia MIT](LICENSE). Los fuentes vendorizados d
 [1]: https://luau.org "Luau"
 [2]: https://github.com/lune-org/lune "Lune — standalone Luau runtime"
 [3]: https://github.com/luau-lang/lute "Lute — standalone Luau runtime for general-purpose programming"
-[4]: https://github.com/Xyraniz/Fengetheus "Fengetheus"

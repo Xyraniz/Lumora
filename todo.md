@@ -33,10 +33,10 @@
 
 ## Fase 5 — Separar identidad de Fengetheus (petición usuario)
 
-- [ ] 5.1 Quitar de documentación/README que Lumora es "para Fengetheus" o "para probar anti-tamper"
-- [ ] 5.2 Reformular Lumora como proyecto independiente (runtime headless de Luau genérico)
-- [ ] 5.3 Mencionar Fengetheus solo como "uno de los consumidores posibles" o caso de uso opcional, no como propósito
-- [ ] 5.4 Quitar referencias a anti-tamper/executor como propósito; recluir executor stubs como capa de compatibilidad opcional
+- [x] 5.1 Quitar de documentación/README que Lumora es "para Fengetheus" o "para probar anti-tamper"
+- [x] 5.2 Reformular Lumora como proyecto independiente (runtime headless de Luau genérico)
+- [x] 5.3 Mencionar Fengetheus solo como "uno de los consumidores posibles" o caso de uso opcional, no como propósito
+- [x] 5.4 Quitar referencias a anti-tamper/executor como propósito; recluir executor stubs como capa de compatibilidad opcional
 
 ## Fase 6 — Ampliar calidad de ingeniería (Prioridad media)
 
