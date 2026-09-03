@@ -1,4 +1,5 @@
 build/
+bin/lumora
 bin/luau-vm
 .vscode/
 .idea/
