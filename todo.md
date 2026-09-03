@@ -11,17 +11,17 @@
 
 ## Fase 2 — Seguridad y aislamiento (Prioridad crítica)
 
-- [ ] 2.1 Quitar `readfile`/`isfile` nativos que acceden al filesystem real; reemplazar por stubs in-memory como el resto del prelude (WindUI debe cargarse embebido, no desde disco)
-- [ ] 2.2 Añadir flag `--sandbox` que deshabilita `loadstring`, `load`, io peligroso, executor stubs y limita coroutines/stdout
+- [x] 2.1 Quitar `readfile`/`isfile` nativos que acceden al filesystem real; reemplazar por stubs in-memory como el resto del prelude (WindUI debe cargarse embebido, no desde disco)
+- [x] 2.2 Añadir flag `--sandbox` que deshabilita `loadstring`, `load`, io peligroso, executor stubs y limita coroutines/stdout
 - [ ] 2.3 Documentar modelo de amenazas en README: Lumora NO es sandbox de seguridad; para código no confiable usar contenedor externo
 - [ ] 2.4 Documentar opción `--sandbox` y su alcance
 
 ## Fase 3 — Estabilizar protocolo JSON (Prioridad alta)
 
-- [ ] 3.1 Generar JSON en un único nivel para TODOS los errores (archivo inexistente, compilación, runtime, timeout, señal, fallo interno)
-- [ ] 3.2 Añadir campos separados: `kind`, `message`, `script`, `durationMs`, `timedOut`
-- [ ] 3.3 No reenvolver stdout del proceso hijo cuando hay error de carga
-- [ ] 3.4 Documentar el esquema JSON y validar con un parser real en tests
+- [x] 3.1 Generar JSON en un único nivel para TODOS los errores (archivo inexistente, compilación, runtime, timeout, señal, fallo interno)
+- [x] 3.2 Añadir campos separados: `kind`, `message`, `script`, `durationMs`, `timedOut`
+- [x] 3.3 No reenvolver stdout del proceso hijo cuando hay error de carga
+- [x] 3.4 Documentar el esquema JSON y validar con un parser real en tests
 
 ## Fase 4 — Dividir el código (Prioridad alta)
 

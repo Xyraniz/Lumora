@@ -64,10 +64,10 @@ El ejecutable recomendado queda disponible en `bin/lumora`. El build también cr
 ## Uso de la CLI
 
 ```text
-lumora [--no-roblox] [--json] [--timeout seconds] script.lua [args...]
+lumora [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]
 ```
 
-El modo Roblox headless está activado por defecto. `--no-roblox` omite el prelude y ejecuta el archivo con Luau puro. `--json` captura la ejecución y escribe un único objeto JSON. `--timeout 5` limita la ejecución a cinco segundos y evita que un bucle infinito bloquee el pipeline. `--help` y `--version` no ejecutan ningún script.
+El modo Roblox headless está activado por defecto. `--no-roblox` omite el prelude y ejecuta el archivo con Luau puro. `--json` captura la ejecución y escribe un único objeto JSON con el esquema documentado más abajo. `--sandbox` deshabilita los globals peligrosos (`loadstring`, `load`, `os`, `io`, hooks de executor y los stubs de filesystem) y limita el scheduler a 10 ciclos, útil para acotar la superficie de scripts semi-confiables dentro de un pipeline. `--timeout 5` limita la ejecución a cinco segundos y evita que un bucle infinito bloquee el pipeline. `--help` y `--version` no ejecutan ningún script.
 
 Los argumentos siguen la convención habitual de Lua: `arg[0]` contiene la ruta del script y `arg[1]` en adelante contienen los argumentos proporcionados por el usuario.
 
@@ -98,6 +98,38 @@ Proteger un runner contra loops que no terminan:
 ```
 
 Una ejecución correcta produce `exitCode: 0` y `ok: true`. Los errores del script producen una respuesta con `ok: false`; las opciones inválidas o errores de invocación de la CLI utilizan código de salida `2`.
+
+### Esquema JSON
+
+Con `--json`, Lumora escribe siempre un único objeto JSON plano en stdout, sin anidar JSON dentro de `stdout`. El mismo esquema se aplica a todos los resultados (éxito, error de carga, error de compilación, error de runtime, timeout y error de invocación), de modo que cualquier consumidor puede leerlo de forma uniforme.
+
+```json
+{
+  "kind": "success",
+  "ok": true,
+  "stdout": "hello-world\n",
+  "stderr": "",
+  "message": "",
+  "exitCode": 0,
+  "durationMs": 12,
+  "timedOut": false,
+  "script": "tests/roblox_api.lua"
+}
+```
+
+| Campo | Tipo | Descripción |
+| --- | --- | --- |
+| `kind` | string | Categoría del resultado: `success`, `load-error`, `compile-error`, `script-error`, `timeout` o `invocation-error`. |
+| `ok` | bool | `true` cuando el script terminó con código de salida `0`. |
+| `stdout` | string | Salida estándar íntegra del script, como texto plano (nunca JSON anidado). |
+| `stderr` | string | Salida de error íntegra del script. |
+| `message` | string | Mensaje legible del fallo; vacío en éxito. |
+| `exitCode` | int | Código de salida del proceso: `0` (éxito), `1` (error de script/timeout), `2` (error de carga o invocación). |
+| `durationMs` | int | Duración de la ejecución en milisegundos, redondeada. |
+| `timedOut` | bool | `true` si la ejecución se interrumpió por `--timeout`. |
+| `script` | string | Ruta del script pasada a Lumora. |
+
+El test `tests/json_schema.sh` valida este esquema con el módulo `json` de Python como parser real, comprobando que cada ruta de error produce un objeto plano con todos los campos, que `stdout` nunca contiene JSON anidado y que `timedOut` se distingue de un error de script ordinario.
 
 ## Superficie Roblox emulada
 

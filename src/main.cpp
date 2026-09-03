@@ -2135,6 +2135,40 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    // Emit a single-level JSON result with an enriched schema. Every error
+    // path (missing file, compile error, runtime error, timeout, signal) uses
+    // this same function so consumers always get a flat, predictable object.
+    auto emitJson = [](const char* kind, bool ok, const std::string& stdoutText,
+                       const std::string& stderrText, const std::string& message,
+                       int exitCode, double durationMs, bool timedOut, const char* scriptPath) {
+        std::cout << "{\"kind\":" << jsonEscape(kind ? kind : "unknown")
+                  << ",\"ok\":" << (ok ? "true" : "false")
+                  << ",\"stdout\":" << jsonEscape(stdoutText)
+                  << ",\"stderr\":" << jsonEscape(stderrText)
+                  << ",\"message\":" << jsonEscape(message)
+                  << ",\"exitCode\":" << exitCode
+                  << ",\"durationMs\":" << (long long)(durationMs + 0.5)
+                  << ",\"timedOut\":" << (timedOut ? "true" : "false")
+                  << ",\"script\":" << jsonEscape(scriptPath ? scriptPath : "")
+                  << "}\n";
+    };
+
+    const auto jsonStart = std::chrono::steady_clock::now();
+
+    // Detect a missing script file before forking so the error is reported at
+    // the parent level (single JSON level) rather than being wrapped by the
+    // child's own output.
+    if (json)
+    {
+        std::ifstream probe(script);
+        if (!probe)
+        {
+            const std::string msg = std::string("cannot open script: ") + script;
+            emitJson("load-error", false, "", "", msg, 2, 0.0, false, script);
+            return 2;
+        }
+    }
+
     try
     {
 #if defined(__unix__)
@@ -2145,6 +2179,10 @@ int main(int argc, char** argv)
             pid_t child = fork();
             if (child == 0)
             {
+                // Child: run the script WITHOUT producing JSON. Only the parent
+                // assembles the final JSON envelope, so there is never nested
+                // JSON. Redirect stdout/stderr to temp files and exit with the
+                // script's own exit code.
                 FILE* out = fopen(outPath.c_str(), "w"); FILE* err = fopen(errPath.c_str(), "w");
                 if (out) { dup2(fileno(out), STDOUT_FILENO); fclose(out); }
                 if (err) { dup2(fileno(err), STDERR_FILENO); fclose(err); }
@@ -2153,10 +2191,10 @@ int main(int argc, char** argv)
                 int rc = runScript(script, int(args.size()), args.data(), roblox, sandbox, timeout);
                 std::cout.flush(); std::cerr.flush(); _exit(rc);
             }
-            int status = 0; const auto started = std::chrono::steady_clock::now(); bool killed = false;
+            int status = 0; bool killed = false;
             while (waitpid(child, &status, WNOHANG) == 0)
             {
-                if (timeout > 0 && std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() > timeout + 1.0)
+                if (timeout > 0 && std::chrono::duration<double>(std::chrono::steady_clock::now() - jsonStart).count() > timeout + 1.0)
                 { kill(child, SIGKILL); killed = true; waitpid(child, &status, 0); break; }
                 usleep(10000);
             }
@@ -2164,9 +2202,17 @@ int main(int argc, char** argv)
             const std::string stdoutText = readText(outPath), stderrText = readText(errPath);
             std::remove(outPath.c_str()); std::remove(errPath.c_str());
             int code = killed ? 124 : (WIFEXITED(status) ? WEXITSTATUS(status) : 1);
-            std::cout << "{\"ok\":" << (code == 0 ? "true" : "false") << ",\"stdout\":" << jsonEscape(stdoutText)
-                      << ",\"stderr\":" << jsonEscape(stderrText) << ",\"error\":" << jsonEscape(code == 0 ? "" : stderrText)
-                      << ",\"exitCode\":" << code << "}\n";
+            const double durationMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - jsonStart).count();
+            // A cooperative Luau timeout surfaces as a script error whose
+            // message starts with "execution timeout". Detect it so consumers
+            // can distinguish a genuine timeout from an ordinary script error.
+            const bool cooperativelyTimedOut = !killed && code != 0 &&
+                stderrText.rfind("execution timeout", 0) == 0;
+            const char* kind = killed ? "timeout" : (code == 0 ? "success" : "script-error");
+            emitJson(kind, code == 0, stdoutText, stderrText,
+                     code == 0 ? "" : stderrText, code, durationMs,
+                     killed || cooperativelyTimedOut, script);
             return code;
         }
 #endif
@@ -2176,7 +2222,12 @@ int main(int argc, char** argv)
     }
     catch (const std::exception& error)
     {
-        if (json) std::cout << "{\"ok\":false,\"stdout\":\"\",\"stderr\":\"\",\"error\":" << jsonEscape(error.what()) << ",\"exitCode\":2}\n";
+        if (json)
+        {
+            const double durationMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - jsonStart).count();
+            emitJson("invocation-error", false, "", "", error.what(), 2, durationMs, false, script);
+        }
         else std::cerr << error.what() << "\n";
         return 2;
     }
