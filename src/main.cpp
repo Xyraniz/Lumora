@@ -75,6 +75,89 @@ local function signal()
 end
 
 local instance_mt = { __metatable = "The metatable is locked" }
+
+-- Roblox class inheritance hierarchy. Each entry maps a class to its parent
+-- class so IsA() can walk the chain (e.g. Part -> BasePart -> PVInstance ->
+-- Instance). This mirrors the real Roblox class tree for the classes Lumora
+-- emulates; classes not listed default to deriving from Instance.
+local _classHierarchy = {
+    Part = "BasePart",
+    MeshPart = "BasePart",
+    TrussPart = "BasePart",
+    WedgePart = "BasePart",
+    CornerWedgePart = "BasePart",
+    BasePart = "PVInstance",
+    PVInstance = "Instance",
+    UnionOperation = "BasePart",
+    NegateOperation = "BasePart",
+    SpecialMesh = "Instance",
+    Model = "Instance",
+    Folder = "Instance",
+    Camera = "Instance",
+    Humanoid = "Instance",
+    Animator = "Instance",
+    Workspace = "World",
+    World = "Instance",
+    Player = "Instance",
+    Backpack = "Instance",
+    PlayerGui = "Instance",
+    PlayerScripts = "Instance",
+    ScreenGui = "GuiObject",
+    Frame = "GuiObject",
+    TextLabel = "GuiObject",
+    TextButton = "GuiButton",
+    ImageButton = "GuiButton",
+    TextBox = "GuiButton",
+    GuiButton = "GuiObject",
+    GuiObject = "Instance",
+    ScrollingFrame = "GuiObject",
+    LocalScript = "Script",
+    Script = "BaseScript",
+    BaseScript = "Instance",
+    ModuleScript = "Instance",
+    Sound = "Instance",
+    Animation = "Instance",
+    AnimationController = "Instance",
+    Motor6D = "JointInstance",
+    Weld = "JointInstance",
+    JointInstance = "Instance",
+    BillboardGui = "Instance",
+    SurfaceGui = "Instance",
+    Fire = "Instance",
+    Smoke = "Instance",
+    Sparkles = "Instance",
+    Attachment = "Instance",
+    Decal = "Instance",
+    Texture = "Decal",
+    RemoteEvent = "Instance",
+    RemoteFunction = "Instance",
+    BindableEvent = "Instance",
+    BindableFunction = "Instance",
+    Folder = "Instance",
+    DataModel = "Instance",
+    Tween = "Instance",
+    RunService = "Instance",
+    UserInputService = "Instance",
+    Players = "Instance",
+    TweenService = "Instance",
+    HttpService = "Instance",
+    ReplicatedStorage = "Instance",
+    Lighting = "Instance",
+    ContentProvider = "Instance",
+    MarketplaceService = "Instance",
+    TeleportService = "Instance",
+    SoundService = "Instance",
+    ContextActionService = "Instance",
+    VirtualInputManager = "Instance",
+    VirtualUser = "Instance",
+    ScriptContext = "Instance",
+    StarterGui = "Instance",
+    CollectionService = "Instance",
+    Debris = "Instance",
+    LocalizationService = "Instance",
+    CoreGui = "Instance",
+}
+
 local function removeChild(parent, child)
     for i, value in ipairs(parent._children) do
         if value == child then table.remove(parent._children, i); return end
@@ -92,7 +175,19 @@ instance_mt.__index = function(self, key)
         while #obj._children > 0 do obj._children[1]:Destroy() end
         obj._destroyed = true
     end end
-    if key == "IsA" then return function(obj, n) return obj.ClassName == n or n == "Instance" end end
+    if key == "IsA" then return function(obj, n)
+        if n == "Instance" then return true end
+        local cn = obj.ClassName
+        if cn == n then return true end
+        -- Walk the Roblox class hierarchy so IsA reports the inheritance
+        -- chain correctly (e.g. Part is a BasePart, BasePart is an Instance).
+        local chain = _classHierarchy[cn]
+        while chain do
+            if chain == n then return true end
+            chain = _classHierarchy[chain]
+        end
+        return false
+    end end
     if key == "GetAttribute" then return function(obj, n) return obj._attributes[n] end end
     if key == "SetAttribute" then return function(obj, n, v) obj._attributes[n]=v; obj.AttributeChanged:Fire(n) end end
     return rawget(self, key)
@@ -156,6 +251,17 @@ local function vec2(x,y)
                 if m == 0 then return vec2(0,0) end
                 return vec2(t.X/m, t.Y/m)
             end
+            if k == "Dot" then return function(a, b) return a.X*b.X + a.Y*b.Y end end
+            if k == "Lerp" then return function(a, b, t)
+                return vec2(a.X+(b.X-a.X)*t, a.Y+(b.Y-a.Y)*t)
+            end end
+            if k == "Cross" then return function(a, b) return a.X*b.Y - a.Y*b.X end end
+            if k == "Angle" then return function(a, b, axis)
+                local dot = a:Dot(b)
+                local mag = a.Magnitude * b.Magnitude
+                if mag == 0 then return 0 end
+                return math.acos(math.max(-1, math.min(1, dot/mag)))
+            end end
             return nil
         end,
         __add = function(a,b) return vec2(a.X+(b.X or 0), a.Y+(b.Y or 0)) end,
@@ -449,6 +555,19 @@ local function vec3(x,y,z)
                 if m == 0 then return vec3(0,0,0) end
                 return vec3(t.X/m, t.Y/m, t.Z/m)
             end
+            if k == "Dot" then return function(a, b) return a.X*b.X + a.Y*b.Y + a.Z*b.Z end end
+            if k == "Cross" then return function(a, b)
+                return vec3(a.Y*b.Z - a.Z*b.Y, a.Z*b.X - a.X*b.Z, a.X*b.Y - a.Y*b.X)
+            end end
+            if k == "Lerp" then return function(a, b, t)
+                return vec3(a.X+(b.X-a.X)*t, a.Y+(b.Y-a.Y)*t, a.Z+(b.Z-a.Z)*t)
+            end end
+            if k == "Angle" then return function(a, b, axis)
+                local dot = a:Dot(b)
+                local mag = a.Magnitude * b.Magnitude
+                if mag == 0 then return 0 end
+                return math.acos(math.max(-1, math.min(1, dot/mag)))
+            end end
             return nil
         end,
         __add = function(a,b) return vec3(a.X+(b.X or 0), a.Y+(b.Y or 0), a.Z+(b.Z or 0)) end,
@@ -467,36 +586,200 @@ Vector3 = { new = vec3,
 }
 
 -- ========== CFrame ==========
+-- A CFrame stores a position and a 3x3 rotation matrix. We implement real
+-- arithmetic so CFrame*CFrame composes transforms, CFrame*Vector3 transforms
+-- points, Angles builds a rotation matrix, and lookAt points the -Z axis
+-- toward the target -- matching Roblox's observable behavior.
 local function cframe(x,y,z,r00,r01,r02,r10,r11,r12,r20,r21,r22)
     if r00 == nil then
         r00,r01,r02,r10,r11,r12,r20,r21,r22 = 1,0,0,0,1,0,0,0,1
     end
+    local pos = Vector3.new(x or 0, y or 0, z or 0)
     return setmetatable({X=x or 0,Y=y or 0,Z=z or 0,
         R0={r00,r01,r02},R1={r10,r11,r12},R2={r20,r21,r22},
-        Position=Vector3.new(x or 0,y or 0,z or 0), __type="CFrame"}, {
-        __add = function(a,b) return CFrame.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
-        __sub = function(a,b) return CFrame.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
+        Position=pos, __type="CFrame"}, {
+        __add = function(a,b) return cframe(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
+        __sub = function(a,b) return cframe(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
         __mul = function(a,b)
-            if type(b)=="number" then return a end
-            if b.__type == "Vector3" then return Vector3.new(a.X, a.Y, a.Z) end
+            if b.__type == "Vector3" then
+                local nx = a.X + a.R0[1]*b.X + a.R0[2]*b.Y + a.R0[3]*b.Z
+                local ny = a.Y + a.R1[1]*b.X + a.R1[2]*b.Y + a.R1[3]*b.Z
+                local nz = a.Z + a.R2[1]*b.X + a.R2[2]*b.Y + a.R2[3]*b.Z
+                return Vector3.new(nx, ny, nz)
+            end
+            if type(b) == "number" then return cframe(a.X*b, a.Y*b, a.Z*b) end
+            if b.__type == "CFrame" then
+                local function matmul(m1, m2)
+                    local out = {}
+                    for row = 1, 3 do
+                        out[row] = {}
+                        for col = 1, 3 do
+                            out[row][col] = m1[row][1]*m2[1][col] + m1[row][2]*m2[2][col] + m1[row][3]*m2[3][col]
+                        end
+                    end
+                    return out
+                end
+                local rot = matmul({a.R0, a.R1, a.R2}, {b.R0, b.R1, b.R2})
+                local px = a.X + a.R0[1]*b.X + a.R0[2]*b.Y + a.R0[3]*b.Z
+                local py = a.Y + a.R1[1]*b.X + a.R1[2]*b.Y + a.R1[3]*b.Z
+                local pz = a.Z + a.R2[1]*b.X + a.R2[2]*b.Y + a.R2[3]*b.Z
+                return cframe(px, py, pz,
+                    rot[1][1], rot[1][2], rot[1][3],
+                    rot[2][1], rot[2][2], rot[2][3],
+                    rot[3][1], rot[3][2], rot[3][3])
+            end
             return a
         end,
-        __tostring = function(c) return string.format("%g, %g, %g", c.X, c.Y, c.Z) end
+        __eq = function(a,b) return a.X==b.X and a.Y==b.Y and a.Z==b.Z end,
+        __tostring = function(c) return string.format("%g, %g, %g", c.X, c.Y, c.Z) end,
+        __index = function(self, key)
+            if key == "Position" then return Vector3.new(self.X, self.Y, self.Z) end
+            if key == "LookVector" then return Vector3.new(-self.R2[1], -self.R2[2], -self.R2[3]) end
+            if key == "RightVector" then return Vector3.new(self.R0[1], self.R0[2], self.R0[3]) end
+            if key == "UpVector" then return Vector3.new(self.R1[1], self.R1[2], self.R1[3]) end
+            if key == "XVector" then return Vector3.new(self.R0[1], self.R0[2], self.R0[3]) end
+            if key == "YVector" then return Vector3.new(self.R1[1], self.R1[2], self.R1[3]) end
+            if key == "ZVector" then return Vector3.new(self.R2[1], self.R2[2], self.R2[3]) end
+            if key == "Inverse" then
+                return function(cf)
+                    local t = {cf.R0, cf.R1, cf.R2}
+                    local inv = {
+                        {t[1][1], t[2][1], t[3][1]},
+                        {t[1][2], t[2][2], t[3][2]},
+                        {t[1][3], t[2][3], t[3][3]},
+                    }
+                    local px = -(inv[1][1]*cf.X + inv[1][2]*cf.Y + inv[1][3]*cf.Z)
+                    local py = -(inv[2][1]*cf.X + inv[2][2]*cf.Y + inv[2][3]*cf.Z)
+                    local pz = -(inv[3][1]*cf.X + inv[3][2]*cf.Y + inv[3][3]*cf.Z)
+                    return cframe(px, py, pz,
+                        inv[1][1], inv[1][2], inv[1][3],
+                        inv[2][1], inv[2][2], inv[2][3],
+                        inv[3][1], inv[3][2], inv[3][3])
+                end
+            end
+            if key == "PointToObjectSpace" then
+                return function(cf, v)
+                    local dx, dy, dz = v.X - cf.X, v.Y - cf.Y, v.Z - cf.Z
+                    return Vector3.new(cf.R0[1]*dx + cf.R0[2]*dy + cf.R0[3]*dz,
+                                       cf.R1[1]*dx + cf.R1[2]*dy + cf.R1[3]*dz,
+                                       cf.R2[1]*dx + cf.R2[2]*dy + cf.R2[3]*dz)
+                end
+            end
+            if key == "PointToWorldSpace" then return function(cf, v) return cf * v end end
+            if key == "VectorToObjectSpace" then
+                return function(cf, v)
+                    return Vector3.new(cf.R0[1]*v.X + cf.R0[2]*v.Y + cf.R0[3]*v.Z,
+                                       cf.R1[1]*v.X + cf.R1[2]*v.Y + cf.R1[3]*v.Z,
+                                       cf.R2[1]*v.X + cf.R2[2]*v.Y + cf.R2[3]*v.Z)
+                end
+            end
+            if key == "VectorToWorldSpace" then
+                return function(cf, v)
+                    return Vector3.new(cf.R0[1]*v.X + cf.R0[2]*v.Y + cf.R0[3]*v.Z,
+                                       cf.R1[1]*v.X + cf.R1[2]*v.Y + cf.R1[3]*v.Z,
+                                       cf.R2[1]*v.X + cf.R2[2]*v.Y + cf.R2[3]*v.Z)
+                end
+            end
+            if key == "ToEulerAnglesXYZ" then return function(cf) return 0, 0, 0 end end
+            if key == "ToOrientation" then return function(cf) return 0, 0, 0 end end
+            return nil
+        end,
     })
 end
 CFrame = { new = cframe,
     identity = cframe(0,0,0),
-    Angles = function(x,y,z) return cframe(0,0,0) end,
-    fromEulerAnglesXYZ = function(x,y,z) return cframe(0,0,0) end,
-    fromMatrix = function(pos,rx,ry,rz) return cframe(pos.X,pos.Y,pos.Z) end,
-    lookAt = function(at,look) return cframe(at.X,at.Y,at.Z) end
+    Angles = function(x,y,z)
+        local cx, sx = math.cos(x), math.sin(x)
+        local cy, sy = math.cos(y), math.sin(y)
+        local cz, sz = math.cos(z), math.sin(z)
+        return cframe(0,0,0,
+            cy*cz, -cy*sz, sy,
+            sx*sy*cz + cx*sz, -sx*sy*sz + cx*cz, -sx*cy,
+            -cx*sy*cz + sx*sz, cx*sy*sz + sx*cz, cx*cy)
+    end,
+    fromEulerAnglesXYZ = function(x,y,z) return CFrame.Angles(x,y,z) end,
+    fromOrientation = function(x,y,z) return CFrame.Angles(x,y,z) end,
+    fromMatrix = function(pos, rx, ry, rz)
+        if not rz then rz = rx:Cross(ry) end
+        return cframe(pos.X, pos.Y, pos.Z,
+            rx.X, ry.X, rz.X,
+            rx.Y, ry.Y, rz.Y,
+            rx.Z, ry.Z, rz.Z)
+    end,
+    lookAt = function(at, look, up)
+        up = up or Vector3.new(0,1,0)
+        local forward = Vector3.new(look.X-at.X, look.Y-at.Y, look.Z-at.Z)
+        local mag = forward.Magnitude
+        if mag < 1e-6 then return cframe(at.X, at.Y, at.Z) end
+        forward = Vector3.new(forward.X/mag, forward.Y/mag, forward.Z/mag)
+        local right = up:Cross(forward)
+        local rmag = right.Magnitude
+        if rmag < 1e-6 then
+            up = Vector3.new(0,0,1)
+            right = up:Cross(forward)
+            rmag = right.Magnitude
+        end
+        right = Vector3.new(right.X/rmag, right.Y/rmag, right.Z/rmag)
+        local realUp = forward:Cross(right)
+        return cframe(at.X, at.Y, at.Z,
+            right.X, realUp.X, -forward.X,
+            right.Y, realUp.Y, -forward.Y,
+            right.Z, realUp.Z, -forward.Z)
+    end
 }
 
 -- ========== Color3 ==========
+-- Roblox's Color3 stores components in the 0..1 range. We expose both the
+-- PascalCase instance methods (ToHex, ToHSV, Lerp) and the legacy lowercase
+-- static helpers (Color3.toHex, Color3.toHSV) that some executor scripts
+-- still call, so both calling conventions work.
+local function _color3ToHex(c)
+    local r = math.floor((c.R or 0) * 255 + 0.5)
+    local g = math.floor((c.G or 0) * 255 + 0.5)
+    local b = math.floor((c.B or 0) * 255 + 0.5)
+    return string.format("%02x%02x%02x", r, g, b)
+end
+
+-- Convert a 0..1 RGB triple to HSV (h,s,v in 0..1). Matches Roblox's
+-- Color3:ToHSV() which returns (hue, saturation, value).
+local function _rgbToHsv(r, g, b)
+    local max = math.max(r, g, b)
+    local min = math.min(r, g, b)
+    local delta = max - min
+    local v = max
+    local s = max == 0 and 0 or (delta / max)
+    local h = 0
+    if delta > 0 then
+        if max == r then
+            h = ((g - b) / delta) % 6
+        elseif max == g then
+            h = (b - r) / delta + 2
+        else
+            h = (r - g) / delta + 4
+        end
+        h = h / 6
+        if h < 0 then h = h + 1 end
+    end
+    return h, s, v
+end
+
 local function color3(r,g,b)
     r, g, b = r or 0, g or 0, b or 0
     return setmetatable({R=r,G=g,B=b,__type="Color3"}, {
-        __tostring = function(c) return string.format("%g, %g, %g", c.R, c.G, c.B) end
+        __index = function(self, key)
+            -- Instance methods (PascalCase, the canonical Roblox API)
+            if key == "ToHex" then return function(c) return _color3ToHex(c) end end
+            if key == "ToHSV" then return function(c) return _rgbToHsv(c.R, c.G, c.B) end end
+            if key == "Lerp" then return function(c, other, t)
+                return color3(c.R+(other.R-c.R)*t, c.G+(other.G-c.G)*t, c.B+(other.B-c.B)*t)
+            end end
+            -- Legacy lowercase aliases for executor compatibility
+            if key == "toHex" then return function(c) return _color3ToHex(c) end end
+            if key == "toHSV" then return function(c) return _rgbToHsv(c.R, c.G, c.B) end end
+            return nil
+        end,
+        __tostring = function(c) return string.format("%g, %g, %g", c.R, c.G, c.B) end,
+        __eq = function(a,b) return a.R==b.R and a.G==b.G and a.B==b.B end,
     })
 end
 Color3 = { new = color3,
@@ -526,13 +809,8 @@ Color3 = { new = color3,
         local b = tonumber(hex:sub(5,6), 16) or 0
         return color3(r/255, g/255, b/255)
     end,
-    toHSV = function(c) return 0, 0, 0 end,
-    toHex = function(c)
-        local r = math.floor((c.R or 0) * 255 + 0.5)
-        local g = math.floor((c.G or 0) * 255 + 0.5)
-        local b = math.floor((c.B or 0) * 255 + 0.5)
-        return string.format("%02x%02x%02x", r, g, b)
-    end,
+    toHSV = function(c) return _rgbToHsv(c.R, c.G, c.B) end,
+    toHex = function(c) return _color3ToHex(c) end,
     lerp = function(a,b,t) return color3(a.R+(b.R-a.R)*t, a.G+(b.G-a.G)*t, a.B+(b.B-a.B)*t) end
 }
 
@@ -1587,6 +1865,34 @@ static int lumora_clonefunction(lua_State* L)
     return 1;
 }
 
+// Set of __type markers that Roblox reports as "userdata" for type().
+// Everything else carrying a __type marker is a value type (Vector3, Color3,
+// CFrame, ...) and type() reports "userdata" for those too in real Roblox,
+// but we keep type() aligned with Luau's native semantics for plain tables
+// while typeof() exposes the Roblox type name.
+static bool isRobloxUserdata(const char* marker)
+{
+    return strcmp(marker, "Instance") == 0 || strcmp(marker, "Enums") == 0 ||
+           strcmp(marker, "Enum") == 0 || strcmp(marker, "EnumItem") == 0;
+}
+
+// Set of __type markers that name a Roblox value type. typeof() returns the
+// marker verbatim for these so scripts get "Vector3", "Color3", "CFrame",
+// "UDim2", "Ray", etc. exactly as Roblox does.
+static bool isRobloxValueType(const char* marker)
+{
+    static const char* kValueTypes[] = {
+        "Vector2", "Vector3", "Color3", "CFrame", "UDim", "UDim2", "Ray",
+        "RaycastParams", "NumberRange", "NumberSequence", "NumberSequenceKeypoint",
+        "ColorSequence", "ColorSequenceKeypoint", "BrickColor", "TweenInfo",
+        "Font", "Rect", "Path2D", "PhysicalProperties", "Enums", "Enum",
+        "EnumItem", "Instance", "Random", "Drawing", "WindUIElement", "Tween",
+        nullptr};
+    for (int i = 0; kValueTypes[i]; ++i)
+        if (strcmp(marker, kValueTypes[i]) == 0) return true;
+    return false;
+}
+
 // Roblox-aware type(v) -> string. Identical to native Luau type() except that
 // tables carrying a __type marker of "Instance", "Enums", "Enum", or
 // "EnumItem" report "userdata", matching what real Roblox returns for its
@@ -1604,9 +1910,19 @@ static int lumora_type(lua_State* L)
         if (lua_isstring(L, -1))
         {
             const char* marker = lua_tostring(L, -1);
-            if (strcmp(marker, "Instance") == 0 || strcmp(marker, "Enums") == 0 ||
-                strcmp(marker, "Enum") == 0 || strcmp(marker, "EnumItem") == 0)
+            // Roblox reports "userdata" for Instance-like objects AND for all
+            // the value datatypes (Vector3, Color3, CFrame, ...). This keeps
+            // type() consistent with real Roblox behavior.
+            if (isRobloxUserdata(marker) || isRobloxValueType(marker))
             {
+                if (isRobloxUserdata(marker))
+                {
+                    lua_pop(L, 1);
+                    lua_pushstring(L, "userdata");
+                    return 1;
+                }
+                // Value datatypes report "userdata" in Roblox's type() too.
+                lua_pop(L, 1);
                 lua_pushstring(L, "userdata");
                 return 1;
             }
@@ -1617,16 +1933,33 @@ static int lumora_type(lua_State* L)
     return 1;
 }
 
-// Roblox-aware typeof(v) -> string. Returns the __type marker for emulated
-// userdata, "Instance" for objects with a ClassName field, "Vector2" for
-// {X=,Y=} tables, and falls back to native type otherwise.
+// Roblox-aware typeof(v) -> string. Returns the __type marker verbatim for
+// all emulated Roblox value/userdata types so scripts get "Vector3",
+// "Color3", "CFrame", "Instance", "Enum", "UDim2", "Ray", etc. exactly as
+// Roblox does. Falls back to native Luau type() otherwise.
 static int lumora_typeof(lua_State* L)
 {
     luaL_checkany(L, 1);
     if (lua_type(L, 1) == LUA_TTABLE)
     {
-        // Check ClassName first (Instance objects) — use rawget to avoid
-        // triggering __index metamethods on emulated userdata.
+        // Check __type marker first (covers all emulated datatypes and
+        // Instances which carry __type="Instance"). Use rawget to avoid
+        // triggering __index metamethods on emulated userdata metatables.
+        lua_pushstring(L, "__type");
+        lua_rawget(L, 1);
+        if (lua_isstring(L, -1))
+        {
+            const char* marker = lua_tostring(L, -1);
+            if (isRobloxValueType(marker))
+            {
+                // Return the marker verbatim (it's already on the stack).
+                return 1;
+            }
+        }
+        lua_pop(L, 1);
+
+        // Fallback for plain tables that look like an Instance (have a
+        // ClassName field) but no __type marker — return "Instance".
         lua_pushstring(L, "ClassName");
         lua_rawget(L, 1);
         if (!lua_isnil(L, -1))
@@ -1636,36 +1969,6 @@ static int lumora_typeof(lua_State* L)
             return 1;
         }
         lua_pop(L, 1);
-
-        // Check __type marker
-        lua_pushstring(L, "__type");
-        lua_rawget(L, 1);
-        if (lua_isstring(L, -1))
-        {
-            const char* marker = lua_tostring(L, -1);
-            if (strcmp(marker, "Instance") == 0 || strcmp(marker, "Enums") == 0 ||
-                strcmp(marker, "Enum") == 0 || strcmp(marker, "EnumItem") == 0 ||
-                strcmp(marker, "Vector2") == 0 || strcmp(marker, "UDim2") == 0 ||
-                strcmp(marker, "Path2D") == 0)
-            {
-                // Keep marker on stack, return it
-                return 1;
-            }
-        }
-        lua_pop(L, 1);
-
-        // Check for Vector2-like {X=, Y=}
-        lua_pushstring(L, "X");
-        lua_rawget(L, 1);
-        lua_pushstring(L, "Y");
-        lua_rawget(L, 1);
-        if (!lua_isnil(L, -2) && !lua_isnil(L, -1))
-        {
-            lua_pop(L, 2);
-            lua_pushstring(L, "Vector2");
-            return 1;
-        }
-        lua_pop(L, 2);
     }
     lua_pushstring(L, lua_typename(L, lua_type(L, 1)));
     return 1;
