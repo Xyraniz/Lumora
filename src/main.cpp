@@ -385,14 +385,45 @@ local function color3(r,g,b)
 end
 Color3 = { new = color3,
     fromRGB = function(r,g,b) return color3(r/255, g/255, b/255) end,
-    fromHSV = function(h,s,v) return color3(0,0,0) end,
-    fromHex = function(hex) return color3(0,0,0) end,
+    fromHSV = function(h,s,v)
+        -- Simple HSV to RGB conversion
+        local i = math.floor(h * 6)
+        local f = h * 6 - i
+        local p = v * (1 - s)
+        local q = v * (1 - f * s)
+        local t = v * (1 - (1 - f) * s)
+        i = i % 6
+        if i == 0 then return color3(v, t, p)
+        elseif i == 1 then return color3(q, v, p)
+        elseif i == 2 then return color3(p, v, t)
+        elseif i == 3 then return color3(p, q, v)
+        elseif i == 4 then return color3(t, p, v)
+        else return color3(v, p, q) end
+    end,
+    fromHex = function(hex)
+        if not hex or type(hex) ~= "string" then return color3(0,0,0) end
+        hex = hex:gsub("^#","")
+        if #hex == 3 then hex = hex:sub(1,1)..hex:sub(1,1)..hex:sub(2,2)..hex:sub(2,2)..hex:sub(3,3)..hex:sub(3,3) end
+        if #hex ~= 6 then return color3(0,0,0) end
+        local r = tonumber(hex:sub(1,2), 16) or 0
+        local g = tonumber(hex:sub(3,4), 16) or 0
+        local b = tonumber(hex:sub(5,6), 16) or 0
+        return color3(r/255, g/255, b/255)
+    end,
     toHSV = function(c) return 0, 0, 0 end,
+    toHex = function(c)
+        local r = math.floor((c.R or 0) * 255 + 0.5)
+        local g = math.floor((c.G or 0) * 255 + 0.5)
+        local b = math.floor((c.B or 0) * 255 + 0.5)
+        return string.format("%02x%02x%02x", r, g, b)
+    end,
     lerp = function(a,b,t) return color3(a.R+(b.R-a.R)*t, a.G+(b.G-a.G)*t, a.B+(b.B-a.B)*t) end
 }
 
 -- ========== UDim ==========
-UDim = { new=function(scale,offset) return {Scale=scale,Offset=offset,__type="UDim"} end }
+UDim = { new=function(scale, offset)
+    return {Scale=scale or 0, Offset=offset or 0, __type="UDim"}
+end }
 
 -- ========== BrickColor ==========
 BrickColor = { new=function(...) return {Name="White",Number=1,Color=Color3.new(1,1,1),__type="BrickColor"} end,
@@ -412,11 +443,40 @@ NumberRange = { new=function(min,max) return {Min=min,Max=max,__type="NumberRang
 -- ========== NumberSequence ==========
 NumberSequence = { new=function(n) return {__type="NumberSequence"} end }
 
+-- ========== NumberSequenceKeypoint ==========
+NumberSequenceKeypoint = { new=function(time, value)
+    return {Time=time or 0, Value=value or 0, Envelope=0, __type="NumberSequenceKeypoint"}
+end }
+
 -- ========== ColorSequence ==========
 ColorSequence = { new=function(c) return {__type="ColorSequence"} end }
 
+-- ========== ColorSequenceKeypoint ==========
+ColorSequenceKeypoint = { new=function(time, color)
+    return {Time=time or 0, Value=color or Color3.new(1,1,1), __type="ColorSequenceKeypoint"}
+end }
+
 -- ========== PhysicalProperties ==========
 PhysicalProperties = { new=function(...) return {__type="PhysicalProperties"} end }
+
+-- ========== Font ==========
+Font = { new=function(face, weight, style)
+    return {Family="rbxasset://fonts/families/SourceSansPro.json", Weight=weight or "Regular",
+        Style=style or "Normal", __type="Font"}
+end }
+Font.fromEnum = function(enum) return Font.new() end
+Font.fromId = function(id) return Font.new() end
+Font.fromName = function(name, weight, style) return Font.new(nil, weight, style) end
+
+-- ========== Rect ==========
+Rect = { new=function(minX, minY, maxX, maxY)
+    return {Min=Vector2.new(minX or 0, minY or 0), Max=Vector2.new(maxX or 0, maxY or 0), Width=(maxX or 0)-(minX or 0), Height=(maxY or 0)-(minY or 0), __type="Rect"}
+end }
+
+-- ========== UDim ==========
+UDim = { new=function(scale, offset)
+    return {Scale=scale or 0, Offset=offset or 0, __type="UDim"}
+end }
 
 -- ========== TweenInfo ==========
 TweenInfo = { new=function(time, easingDir, easingStyle, repeatCount, reverses, delay)
@@ -594,6 +654,7 @@ local icons = {}
 local iconType = 'lucide'
 function module.SetIconsType(t) iconType = t or 'lucide' end
 function module.AddIcons(tbl) for k,v in pairs(tbl or {}) do icons[k] = v end end
+function module.Init(r, name) end
 function module.Icon(name, opts)
     return { Image = 'rbxasset://textures/ui/GuiImagePlaceholder.png',
              Name = name or '', ImageRectOffset = Vector2.new(0,0),
@@ -865,6 +926,12 @@ end
 
 -- SoundService
 game:GetService("SoundService")
+
+-- LocalizationService
+do
+    local ls = game:GetService("LocalizationService")
+    ls.SystemLocaleId = "en"
+end
 
 -- SetCoreGuiEnabled via StarterGui
 do
