@@ -11,7 +11,7 @@ set -e
 test "$RC" -eq 1
 grep -Fq '"ok":false' <<<"$JSON"
 grep -Fq 'boom' <<<"$JSON"
-"$VM" --version | grep -Fxq 'lumora 0.1.0'
+"$VM" --version | grep -Fxq 'lumora 0.2.0'
 "$VM" --help | grep -Fq 'usage: lumora'
 set +e
 "$VM" --definitely-invalid "$TMP" >/dev/null 2>&1

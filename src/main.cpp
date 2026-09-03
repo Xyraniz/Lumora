@@ -5,11 +5,13 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 #include <limits>
 #include <cmath>
@@ -17,7 +19,12 @@
 #include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
+#else
+#include <ctime>
 #endif
+
+// Lumora semantic version — keep in sync with CHANGELOG.md.
+static constexpr const char* kVersion = "lumora 0.2.0";
 
 int main(int argc, char** argv)
 {
@@ -39,7 +46,7 @@ int main(int argc, char** argv)
         }
         else if (option == "--version")
         {
-            std::cout << "lumora 0.1.0\n";
+            std::cout << kVersion << "\n";
             return 0;
         }
         else if (option == "--timeout" && i + 1 < argc)
@@ -62,7 +69,7 @@ int main(int argc, char** argv)
     }
     if (!script)
     {
-        std::cerr << "usage: lumora [--no-roblox] [--json] [--timeout seconds] script.lua [args...]\n";
+        std::cerr << "usage: lumora [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
         return 2;
     }
 
@@ -100,9 +107,22 @@ int main(int argc, char** argv)
         }
     }
 
+    // Build the argv vector once — used by both the fork path and the
+    // thread-based fallback path.
+    std::vector<char*> runArgs;
+    runArgs.push_back(argv[0]);
+    runArgs.push_back(const_cast<char*>(script));
+    for (char* a : scriptArgs) runArgs.push_back(a);
+
     try
     {
 #if defined(__unix__)
+        // ── Unix path: fork + waitpid ───────────────────────────────────
+        // True process isolation: the child runs the script with stdout/stderr
+        // redirected to temp files, while the parent monitors for cooperative
+        // or hard timeout via SIGKILL. This is the preferred JSON capture
+        // strategy because it guarantees clean exit-code propagation and
+        // prevents a runaway script from corrupting the parent's JSON output.
         if (json)
         {
             const std::string outPath = "/tmp/lumora-" + std::to_string(getpid()) + ".out";
@@ -117,9 +137,7 @@ int main(int argc, char** argv)
                 FILE* out = fopen(outPath.c_str(), "w"); FILE* err = fopen(errPath.c_str(), "w");
                 if (out) { dup2(fileno(out), STDOUT_FILENO); fclose(out); }
                 if (err) { dup2(fileno(err), STDERR_FILENO); fclose(err); }
-                std::vector<char*> args; args.push_back(argv[0]); args.push_back(const_cast<char*>(script));
-                for (char* a : scriptArgs) args.push_back(a);
-                int rc = runScript(script, int(args.size()), args.data(), roblox, sandbox, timeout);
+                int rc = runScript(script, int(runArgs.size()), runArgs.data(), roblox, sandbox, timeout);
                 std::cout.flush(); std::cerr.flush(); _exit(rc);
             }
             int status = 0; bool killed = false;
@@ -146,10 +164,51 @@ int main(int argc, char** argv)
                      killed || cooperativelyTimedOut, script);
             return code;
         }
+#else
+        // ── Non-Unix (Windows) path: thread-based capture ──────────────
+        // On platforms without fork(), capture stdout/stderr by redirecting
+        // the C FILE* handles to temporary files via freopen, running the
+        // script in the current thread, then restoring the original streams.
+        // The cooperative timeout interrupt (installed inside runScript)
+        // handles timeouts without requiring process-level signals.
+        if (json)
+        {
+            char outPath[L_tmpnam], errPath[L_tmpnam];
+            tmpnam(outPath); tmpnam(errPath);
+            std::FILE* oldOut = std::freopen(outPath, "w", stdout);
+            std::FILE* oldErr = std::freopen(errPath, "w", stderr);
+            int code = 0;
+            std::string capturedError;
+            try
+            {
+                code = runScript(script, int(runArgs.size()), runArgs.data(), roblox, sandbox, timeout);
+            }
+            catch (const std::exception& e)
+            {
+                capturedError = e.what();
+                code = 2;
+            }
+            if (oldOut) std::fflush(stdout);
+            if (oldErr) std::fflush(stderr);
+            // Restore original streams and read captured output.
+            if (oldOut) { std::freopen("CONOUT$", "w", stdout); }
+            if (oldErr) { std::freopen("CONOUT$", "w", stderr); }
+            auto readText = [](const char* path) { std::ifstream f(path); std::ostringstream s; s << f.rdbuf(); return s.str(); };
+            const std::string stdoutText = readText(outPath), stderrText = readText(errPath);
+            std::remove(outPath); std::remove(errPath);
+            const double durationMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - jsonStart).count();
+            const bool cooperativelyTimedOut = code != 0 &&
+                stderrText.rfind("execution timeout", 0) == 0;
+            const char* kind = (code == 0 ? "success" : (cooperativelyTimedOut ? "timeout" : "script-error"));
+            emitJson(kind, code == 0, stdoutText, stderrText,
+                     code == 0 ? "" : (capturedError.empty() ? stderrText : capturedError),
+                     code, durationMs, cooperativelyTimedOut, script);
+            return code;
+        }
 #endif
-        std::vector<char*> args; args.push_back(argv[0]); args.push_back(const_cast<char*>(script));
-        for (char* a : scriptArgs) args.push_back(a);
-        return runScript(script, int(args.size()), args.data(), roblox, sandbox, timeout);
+        // Non-JSON mode: run directly and return the script's exit code.
+        return runScript(script, int(runArgs.size()), runArgs.data(), roblox, sandbox, timeout);
     }
     catch (const std::exception& error)
     {
