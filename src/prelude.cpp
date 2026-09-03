@@ -133,7 +133,17 @@ instance_mt.__index = function(self, key)
     if key == "Parent" then return rawget(self, "_parent") end
     if key == "GetChildren" then return function(obj) if obj == nil then error("Expected ':' not '.' calling member function GetChildren", 0) end return obj._children end end
     if key == "FindFirstChild" then return function(obj, name) for _, c in ipairs(obj._children) do if c.Name == name then return c end end return nil end end
-    if key == "WaitForChild" then return function(obj, name) return obj:FindFirstChild(name) or error("Infinite yield possible on '" .. obj:GetFullName() .. ":WaitForChild(" .. name .. ")'") end end
+    if key == "WaitForChild" then return function(obj, name, timeout)
+        local child = obj:FindFirstChild(name)
+        if child then return child end
+        -- In headless mode we cannot truly yield. If a timeout was provided,
+        -- return nil (matching Roblox behavior after timeout). Without a
+        -- timeout, warn about infinite yield and return nil rather than
+        -- hard-erroring, since the script may have fallback logic.
+        if timeout then return nil end
+        warn("Infinite yield possible on '" .. obj:GetFullName() .. ":WaitForChild(" .. name .. ")'")
+        return nil
+    end end
     if key == "GetService" then return function(obj, name) return obj._services[name] or Instance.new(name, obj) end end
     if key == "GetFullName" then return function(obj) local p=obj.Name; local q=obj.Parent; while q do p=q.Name.."."..p; q=q.Parent end return p end end
     if key == "Destroy" then return function(obj)
@@ -177,6 +187,12 @@ end
 Instance = {}
 function Instance.new(className, parent)
     local o = setmetatable({ ClassName=className, Name=className, __type="Instance", _children={}, _attributes={}, AttributeChanged=signal(), ChildAdded=signal(), ChildRemoved=signal() }, instance_mt)
+    -- BindableEvent: expose Event signal and Fire method like real Roblox
+    if className == "BindableEvent" then
+        o.Event = signal()
+        o._fire = o.Event.Fire
+        function o:Fire(...) self.Event:Fire(...) end
+    end
     if parent then o.Parent = parent end
     return o
 end
@@ -316,8 +332,17 @@ function Random.new(seed)
         local value = (hi * 4294967296 + lo) / 18446744073709551616
         return a + value * (b-a)
     end
-    function r:NextUnitVector() local a=self:NextNumber(0, math.pi*2); return vec2(math.cos(a),math.sin(a)) end
+    function r:NextUnitVector()
+        -- Roblox returns a uniformly-distributed unit Vector3 on the unit
+        -- sphere. We use the standard method: pick a random direction via
+        -- two uniform samples and map to the sphere surface.
+        local z = self:NextNumber(-1, 1)
+        local theta = self:NextNumber(0, math.pi * 2)
+        local r2 = math.sqrt(1 - z * z)
+        return Vector3.new(r2 * math.cos(theta), r2 * math.sin(theta), z)
+    end
     function r:Clone() local copy = Random.new(0); copy._state = {lo=self._state.lo, hi=self._state.hi}; return copy end
+    r.__type = "Random"
     return r
 end
 
