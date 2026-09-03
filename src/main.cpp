@@ -2,11 +2,19 @@
 #include "lualib.h"
 #include "Luau/Compiler.h"
 
+#include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
+#if defined(__unix__)
+#include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 static std::string readFile(const char* path)
 {
@@ -127,54 +135,127 @@ static bool installPrelude(lua_State* L)
     return lua_pcall(L, 0, 0, 0) == 0;
 }
 
+static double g_timeoutSeconds = 0.0;
+static std::chrono::steady_clock::time_point g_started;
+
+static void timeoutInterrupt(lua_State* L, int gc)
+{
+    if (gc >= 0 || g_timeoutSeconds <= 0.0)
+        return;
+    const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_started).count();
+    if (elapsed >= g_timeoutSeconds)
+        luaL_error(L, "execution timeout after %.3g seconds", g_timeoutSeconds);
+}
+
+static int runScript(const char* path, int argc, char** argv, bool roblox, double timeout)
+{
+    const std::string source = readFile(path);
+    lua_State* L = luaL_newstate();
+    if (!L) { std::cerr << "failed to create Luau state\\n"; return 70; }
+    luaL_openlibs(L);
+    pushArgs(L, argc, argv, 1);
+    if (roblox && !installPrelude(L))
+    {
+        std::cerr << lua_tostring(L, -1) << "\\n";
+        lua_close(L); return 70;
+    }
+    g_timeoutSeconds = timeout;
+    g_started = std::chrono::steady_clock::now();
+    if (timeout > 0.0) lua_callbacks(L)->interrupt = timeoutInterrupt;
+    Luau::CompileOptions options;
+    options.optimizationLevel = 1;
+    options.debugLevel = 1;
+    const std::string bytecode = Luau::compile(source, options);
+    int rc = 0;
+    if (luau_load(L, path, bytecode.data(), bytecode.size(), 0) != 0 || lua_pcall(L, 0, LUA_MULTRET, 0) != 0)
+    {
+        std::cerr << lua_tostring(L, -1) << "\\n";
+        rc = 1;
+    }
+    lua_close(L);
+    return rc;
+}
+
+static std::string jsonEscape(const std::string& value)
+{
+    std::string out = "\"";
+    for (unsigned char c : value)
+    {
+        if (c == '\\') out += "\\\\";
+        else if (c == '"') out += "\\\"";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else if (c == '\t') out += "\\t";
+        else if (c < 32) { char b[8]; snprintf(b, sizeof(b), "\\u%04x", c); out += b; }
+        else out += char(c);
+    }
+    return out + "\"";
+}
+
 int main(int argc, char** argv)
 {
-    if (argc < 2)
+    bool roblox = true, json = false;
+    double timeout = 0.0;
+    std::vector<char*> scriptArgs;
+    const char* script = nullptr;
+    for (int i = 1; i < argc; ++i)
     {
-        std::cerr << "usage: luau-vm script.lua [args...]\n";
+        std::string option = argv[i];
+        if (option == "--no-roblox") roblox = false;
+        else if (option == "--json") json = true;
+        else if (option == "--timeout" && i + 1 < argc) timeout = std::stod(argv[++i]);
+        else if (!script) script = argv[i];
+        else scriptArgs.push_back(argv[i]);
+    }
+    if (!script)
+    {
+        std::cerr << "usage: luau-vm [--no-roblox] [--json] [--timeout seconds] script.lua [args...]\n";
         return 2;
     }
 
     try
     {
-        const std::string source = readFile(argv[1]);
-        lua_State* L = luaL_newstate();
-        if (!L)
+#if defined(__unix__)
+        if (json)
         {
-            std::cerr << "failed to create Luau state\n";
-            return 70;
+            const std::string outPath = "/tmp/lumora-" + std::to_string(getpid()) + ".out";
+            const std::string errPath = "/tmp/lumora-" + std::to_string(getpid()) + ".err";
+            pid_t child = fork();
+            if (child == 0)
+            {
+                FILE* out = fopen(outPath.c_str(), "w"); FILE* err = fopen(errPath.c_str(), "w");
+                if (out) { dup2(fileno(out), STDOUT_FILENO); fclose(out); }
+                if (err) { dup2(fileno(err), STDERR_FILENO); fclose(err); }
+                std::vector<char*> args; args.push_back(argv[0]); args.push_back(const_cast<char*>(script));
+                for (char* a : scriptArgs) args.push_back(a);
+                int rc = runScript(script, int(args.size()), args.data(), roblox, timeout);
+                std::cout.flush(); std::cerr.flush(); _exit(rc);
+            }
+            int status = 0; const auto started = std::chrono::steady_clock::now(); bool killed = false;
+            while (waitpid(child, &status, WNOHANG) == 0)
+            {
+                if (timeout > 0 && std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() > timeout + 1.0)
+                { kill(child, SIGKILL); killed = true; waitpid(child, &status, 0); break; }
+                usleep(10000);
+            }
+            auto readText = [](const std::string& path) { std::ifstream f(path); std::ostringstream s; s << f.rdbuf(); return s.str(); };
+            const std::string stdoutText = readText(outPath), stderrText = readText(errPath);
+            std::remove(outPath.c_str()); std::remove(errPath.c_str());
+            int code = killed ? 124 : (WIFEXITED(status) ? WEXITSTATUS(status) : 1);
+            std::cout << "{\"ok\":" << (code == 0 ? "true" : "false") << ",\"stdout\":" << jsonEscape(stdoutText)
+                      << ",\"stderr\":" << jsonEscape(stderrText) << ",\"error\":" << jsonEscape(code == 0 ? "" : stderrText)
+                      << ",\"exitCode\":" << code << "}\n";
+            return code;
         }
-        luaL_openlibs(L);
-        pushArgs(L, argc, argv, 1);
-        if (!installPrelude(L))
-        {
-            std::cerr << lua_tostring(L, -1) << "\n";
-            lua_close(L);
-            return 70;
-        }
-
-        Luau::CompileOptions options;
-        options.optimizationLevel = 1;
-        options.debugLevel = 1;
-        const std::string bytecode = Luau::compile(source, options);
-        if (luau_load(L, argv[1], bytecode.data(), bytecode.size(), 0) != 0)
-        {
-            std::cerr << lua_tostring(L, -1) << "\n";
-            lua_close(L);
-            return 1;
-        }
-        if (lua_pcall(L, 0, LUA_MULTRET, 0) != 0)
-        {
-            std::cerr << lua_tostring(L, -1) << "\n";
-            lua_close(L);
-            return 1;
-        }
-        lua_close(L);
-        return 0;
+#endif
+        std::vector<char*> args; args.push_back(argv[0]); args.push_back(const_cast<char*>(script));
+        for (char* a : scriptArgs) args.push_back(a);
+        return runScript(script, int(args.size()), args.data(), roblox, timeout);
     }
     catch (const std::exception& error)
     {
-        std::cerr << error.what() << "\n";
+        if (json) std::cout << "{\"ok\":false,\"stdout\":\"\",\"stderr\":\"\",\"error\":" << jsonEscape(error.what()) << ",\"exitCode\":2}\n";
+        else std::cerr << error.what() << "\n";
         return 2;
     }
 }
