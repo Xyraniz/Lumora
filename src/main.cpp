@@ -1777,36 +1777,6 @@ static int lumora_loadstring(lua_State* L)
     return 1;
 }
 
-// readfile(path) — read a file from the real filesystem. This overrides
-// the prelude's in-memory stub so that game:HttpGet can load vendored
-// libraries (e.g. WindUI) from disk. Returns the file contents as a string,
-// or an empty string if the file cannot be opened (matching Roblox semantics
-// where readfile returns "" for missing files in most executors).
-static int lumora_readfile(lua_State* L)
-{
-    const char* path = luaL_optstring(L, 1, "");
-    try
-    {
-        std::string content = readFile(path);
-        lua_pushlstring(L, content.data(), content.size());
-    }
-    catch (const std::exception&)
-    {
-        lua_pushstring(L, "");
-    }
-    return 1;
-}
-
-// isfile(path) — check if a file exists on the real filesystem.
-static int lumora_isfile(lua_State* L)
-{
-    const char* path = luaL_optstring(L, 1, "");
-    FILE* f = fopen(path, "rb");
-    if (f) { fclose(f); lua_pushboolean(L, 1); return 1; }
-    lua_pushboolean(L, 0);
-    return 1;
-}
-
 static bool installPrelude(lua_State* L)
 {
     Luau::CompileOptions options;
@@ -2004,14 +1974,10 @@ static void registerRobloxGlobals(lua_State* L)
     lua_pushcfunction(L, lumora_typeof, "typeof");
     lua_setglobal(L, "typeof");
 
-    // Native readfile/isfile that read from the real filesystem, overriding
-    // the prelude's in-memory stubs. This lets game:HttpGet load vendored
-    // libraries like WindUI from disk.
-    lua_pushcfunction(L, lumora_readfile, "readfile");
-    lua_setglobal(L, "readfile");
-
-    lua_pushcfunction(L, lumora_isfile, "isfile");
-    lua_setglobal(L, "isfile");
+    // Note: readfile/isfile/loadfile remain as the in-memory stubs defined in
+    // the prelude. Lumora deliberately does NOT expose real filesystem access
+    // to scripts, so untrusted code cannot read host files. WindUI and other
+    // vendored libraries are served from the embedded prelude instead of disk.
 }
 
 static double g_timeoutSeconds = 0.0;
@@ -2026,7 +1992,38 @@ static void timeoutInterrupt(lua_State* L, int gc)
         luaL_error(L, "execution timeout after %.3g seconds", g_timeoutSeconds);
 }
 
-static int runScript(const char* path, int argc, char** argv, bool roblox, double timeout)
+// Apply sandbox restrictions: remove dangerous globals so untrusted scripts
+// cannot compile code dynamically, access the OS, or call executor hooks.
+// This is a defense-in-depth layer; Lumora is still NOT a security sandbox
+// and untrusted code must additionally run in an isolated container.
+static void applySandbox(lua_State* L)
+{
+    const char* kDangerousGlobals[] = {
+        "loadstring", "load", "dofile", "loadfile",
+        "os", "io",
+        "getgenv", "getrenv", "hookfunction", "hookmetamethod",
+        "getrawmetatable", "setrawmetatable", "getnamecallmethod",
+        "setnamecallmethod", "checkcaller", "cloneref", "clonereference",
+        "request", "syn", "Drawing", "writefile", "readfile", "isfile",
+        "isfolder", "makefolder", "delfile", "delfolder", "listfiles",
+        "appendfile", "getconnections", "gethui", "protectgui", "setclipboard",
+        nullptr};
+    for (int i = 0; kDangerousGlobals[i]; ++i)
+    {
+        lua_pushnil(L);
+        lua_setglobal(L, kDangerousGlobals[i]);
+    }
+    // Cap the scheduler so a sandboxed script cannot spawn unbounded threads.
+    lua_getglobal(L, "task");
+    if (lua_istable(L, -1))
+    {
+        lua_pushinteger(L, 10);
+        lua_setfield(L, -2, "_maxCycles");
+    }
+    lua_pop(L, 1);
+}
+
+static int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox, double timeout)
 {
     const std::string source = readFile(path);
     lua_State* L = luaL_newstate();
@@ -2040,6 +2037,8 @@ static int runScript(const char* path, int argc, char** argv, bool roblox, doubl
     }
     if (roblox)
         registerRobloxGlobals(L);
+    if (sandbox)
+        applySandbox(L);
     g_timeoutSeconds = timeout;
     g_started = std::chrono::steady_clock::now();
     if (timeout > 0.0) lua_callbacks(L)->interrupt = timeoutInterrupt;
@@ -2091,7 +2090,7 @@ static std::string jsonEscape(const std::string& value)
 
 int main(int argc, char** argv)
 {
-    bool roblox = true, json = false;
+    bool roblox = true, json = false, sandbox = false;
     double timeout = 0.0;
     std::vector<char*> scriptArgs;
     const char* script = nullptr;
@@ -2101,9 +2100,10 @@ int main(int argc, char** argv)
         std::string option = argv[i];
         if (option == "--no-roblox") roblox = false;
         else if (option == "--json") json = true;
+        else if (option == "--sandbox") sandbox = true;
         else if (option == "--help" || option == "-h")
         {
-            std::cout << "usage: lumora [--no-roblox] [--json] [--timeout seconds] script.lua [args...]\n";
+            std::cout << "usage: lumora [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
             return 0;
         }
         else if (option == "--version")
@@ -2150,7 +2150,7 @@ int main(int argc, char** argv)
                 if (err) { dup2(fileno(err), STDERR_FILENO); fclose(err); }
                 std::vector<char*> args; args.push_back(argv[0]); args.push_back(const_cast<char*>(script));
                 for (char* a : scriptArgs) args.push_back(a);
-                int rc = runScript(script, int(args.size()), args.data(), roblox, timeout);
+                int rc = runScript(script, int(args.size()), args.data(), roblox, sandbox, timeout);
                 std::cout.flush(); std::cerr.flush(); _exit(rc);
             }
             int status = 0; const auto started = std::chrono::steady_clock::now(); bool killed = false;
@@ -2172,7 +2172,7 @@ int main(int argc, char** argv)
 #endif
         std::vector<char*> args; args.push_back(argv[0]); args.push_back(const_cast<char*>(script));
         for (char* a : scriptArgs) args.push_back(a);
-        return runScript(script, int(args.size()), args.data(), roblox, timeout);
+        return runScript(script, int(args.size()), args.data(), roblox, sandbox, timeout);
     }
     catch (const std::exception& error)
     {
