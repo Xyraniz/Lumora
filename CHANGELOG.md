@@ -15,6 +15,15 @@ All notable changes to Lumora are documented in this file. The format is based o
 - Security model documentation in README: Lumora is not a security sandbox; untrusted code requires external container isolation.
 - GitHub Actions CI workflow (Linux + macOS, GCC + Clang, Release + Debug).
 - Modular C++ source layout: `src/main.cpp`, `src/prelude.cpp`, `src/runtime.cpp`, `src/json.cpp`, `src/lumora.h`.
+- `tests/properties_contract.lua` — regression tests for Vector2/3 properties (Magnitude, Unit, arithmetic), CFrame transforms, Color3.fromRGB/fromHSV, UDim2 properties, and Random determinism.
+- `tests/events_contract.lua` — tests for signal connect order, Disconnect, Once, DisconnectAll, ChildAdded/ChildRemoved, Destroy cleanup, and AttributeChanged.
+- `tests/negative_contract.lua` — tests for unknown Instance classes, IsA with fake classes, missing attributes/children, WaitForChild with timeout, pcall/xpcall, and Enum access.
+- `examples/` directory with four example scripts: `hello.lua`, `datatypes.lua`, `instance_tree.lua`, `json_pipeline.lua`.
+- `COMPATIBILITY.md` — detailed per-API compatibility matrix (implemented, partial, not supported).
+- Supported platform matrix in README (Ubuntu 22.04/24.04, macOS 13/14, Windows 10/11).
+- Release and checksum verification documentation in README.
+- Windows CI job (MSVC, windows-latest) in GitHub Actions workflow.
+- Cross-platform JSON capture: thread-based `freopen` fallback for non-Unix platforms alongside the existing fork+waitpid path on Unix.
 
 ### Changed
 - `typeof` now returns the `__type` marker verbatim for all emulated value types (Vector3, Color3, CFrame, UDim2, Ray, etc.) instead of falling through to heuristics.
@@ -32,6 +41,10 @@ All notable changes to Lumora are documented in this file. The format is based o
 - `Part:IsA("BasePart")` returned `false` — now walks the hierarchy and returns `true`.
 - Nested JSON on missing script file: the parent now reports a single-level `load-error` object instead of wrapping the child's output.
 - `Color3.toHSV` returned zeros — now returns real HSV values.
+- `Random.NextUnitVector` returned a Vector2 instead of a Vector3 — now uses proper spherical distribution.
+- `BindableEvent.Event` was nil — now properly exposes the `.Event` signal and `:Fire()` method.
+- `WaitForChild` with timeout errored instead of returning nil — now returns nil when a timeout is provided.
+- `UDim2` printed as a raw table — now has a `__tostring` metamethod producing `{ScaleX, OffsetX, ScaleY, OffsetY}`.
 
 ### Removed
 - `readfile` and `isfile` native C closures that accessed the real filesystem. Scripts now only see in-memory stubs from the prelude.

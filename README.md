@@ -61,6 +61,20 @@ El ejecutable recomendado queda disponible en `bin/lumora`. El build también cr
 ./bin/run script.lua argumento1 argumento2
 ```
 
+## Plataformas soportadas
+
+Lumora se compila y ejecuta en las siguientes plataformas. El CI valida cada combinación en cada push y pull request.
+
+| Plataforma | Arquitectura | Compiladores | Estado | Notas |
+|---|---|---|---|---|
+| Ubuntu 22.04 LTS | x86_64 | GCC 11–12, Clang 14 | CI verde | Ruta preferida; JSON usa fork+waitpid |
+| Ubuntu 24.04 LTS | x86_64 | GCC 13–14, Clang 18 | CI verde | Igual que 22.04 |
+| macOS 13 (Ventura) | x86_64 | Apple Clang | CI verde | JSON usa fork+waitpid |
+| macOS 14 (Sonoma) | ARM64 (Apple Silicon) | Apple Clang | CI verde | JSON usa fork+waitpid |
+| Windows 10/11 | x86_64 | MSVC 2019+ | Build manual | JSON usa captura vía freopen; sin aislamiento de proceso |
+
+El modo `--json` funciona en todas las plataformas. En Unix (Linux y macOS) se usa `fork`+`waitpid` para aislamiento real del proceso y timeout duro con `SIGKILL`. En Windows se redirige `stdout`/`stderr` a archivos temporales con `freopen` y se ejecuta el script en el hilo principal; el timeout cooperativo del interrupt de Luau sigue disponible, pero no hay timeout duro a nivel de proceso. Para scripts que puedan entrar en bucles no cooperativos en Windows, se recomienda envolver Lumora en un contenedor con límites de CPU.
+
 ## Uso de la CLI
 
 ```text
@@ -234,6 +248,26 @@ Lumora está pensado para ejecutar y validar scripts en un entorno local, no par
 ## Versionado y changelog
 
 Lumora sigue [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Los cambios notables de cada versión se documentan en [CHANGELOG.md](CHANGELOG.md). La matriz detallada de compatibilidad por API (implementado, parcial, no soportado) está en [COMPATIBILITY.md](COMPATIBILITY.md).
+
+## Releases y checksums
+
+Las versiones estables se publican como tarballs fuente etiquetados en Git (`git tag v0.2.0`) y como binarios precompilados para Linux x86_64 y macOS universal. Cada release incluye un archivo `SHA256SUMS.txt` con las sumas de comprobación de todos los artefactos.
+
+Para verificar un binario descargado:
+
+```bash
+sha256sum -c SHA256SUMS.txt --ignore-missing
+```
+
+Para construir un binario reproducible localmente y comparar:
+
+```bash
+git checkout v0.2.0
+make
+sha256sum bin/lumora
+```
+
+El build es determinista para una misma combinación de compilador, flags y versión de Luau vendorizada, por lo que el hash resultante debe coincidir con el publicado en el release correspondiente. Los checksums de cada versión se mantienen en la página de [Releases](https://github.com/Xyraniz/Lumora/releases) del repositorio.
 
 ## Actualizar Luau vendorizado
 
