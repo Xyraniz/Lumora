@@ -281,6 +281,7 @@ int main(int argc, char** argv)
     double timeout = 0.0;
     std::vector<char*> scriptArgs;
     const char* script = nullptr;
+    std::string parseError;
     for (int i = 1; i < argc; ++i)
     {
         std::string option = argv[i];
@@ -298,12 +299,21 @@ int main(int argc, char** argv)
         }
         else if (option == "--timeout" && i + 1 < argc)
         {
-            timeout = std::stod(argv[++i]);
-            if (!std::isfinite(timeout) || timeout < 0.0) throw std::invalid_argument("timeout must be a finite non-negative number");
+            try
+            {
+                timeout = std::stod(argv[++i]);
+                if (!std::isfinite(timeout) || timeout < 0.0) throw std::invalid_argument("timeout must be a finite non-negative number");
+            }
+            catch (const std::exception& error) { parseError = error.what(); break; }
         }
         else if (!script && option.rfind("--", 0) != 0) script = argv[i];
         else if (script) scriptArgs.push_back(argv[i]);
-        else throw std::invalid_argument("unknown option: " + option);
+        else { parseError = "unknown option: " + option; break; }
+    }
+    if (!parseError.empty())
+    {
+        std::cerr << parseError << "\n";
+        return 2;
     }
     if (!script)
     {
