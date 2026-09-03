@@ -11,9 +11,14 @@ set(LUAU_BUILD_WEB OFF CACHE BOOL "" FORCE)
 set(LUAU_WERROR OFF CACHE BOOL "" FORCE)
 add_subdirectory(vendor/luau EXCLUDE_FROM_ALL)
 
-add_executable(lumora src/main.cpp)
+add_executable(lumora
+    src/main.cpp
+    src/prelude.cpp
+    src/runtime.cpp
+    src/json.cpp
+)
 target_link_libraries(lumora PRIVATE Luau.Compiler Luau.VM Luau.Common)
-target_include_directories(lumora PRIVATE vendor/luau/VM/include vendor/luau/Compiler/include)
+target_include_directories(lumora PRIVATE vendor/luau/VM/include vendor/luau/Compiler/include src)
 
 if(UNIX)
     target_link_libraries(lumora PRIVATE pthread dl m)

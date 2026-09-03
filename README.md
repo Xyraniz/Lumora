@@ -148,13 +148,17 @@ La tabla siguiente resume la API cubierta por el prelude actual. La compatibilid
 | Aleatoriedad | `Random.new(seed)`, `NextInteger`, `NextNumber`, `NextUnitVector` y `Clone`, con estado PCG32 determinista. |
 | Biblioteca Luau | Biblioteca estándar, `bit32`, `string.pack/unpack`, `buffer`, `utf8` y sintaxis moderna del compilador. |
 
-La implementación se mantiene en un prelude aislado dentro de `src/main.cpp`. Esta decisión permite ampliar la superficie de compatibilidad sin modificar la VM vendorizada ni acoplarla a un cliente gráfico. La paridad exacta con una versión concreta de Roblox debe comprobarse mediante vectores dorados de esa versión; Lumora prioriza la compatibilidad observable que necesitan sus tests y pipelines.
+La implementación se mantiene en un prelude aislado dentro de `src/prelude.cpp` (con closures nativas en C) y utilidades de ejecución en `src/runtime.cpp`. Esta decisión permite ampliar la superficie de compatibilidad sin modificar la VM vendorizada ni acoplarla a un cliente gráfico. La paridad exacta con una versión concreta de Roblox debe comprobarse mediante vectores dorados de esa versión; Lumora prioriza la compatibilidad observable que necesitan sus tests y pipelines.
 
 ## Arquitectura del repositorio
 
 | Ruta | Responsabilidad |
 | --- | --- |
-| `src/main.cpp` | CLI, compilación y ejecución Luau, prelude Roblox, captura JSON, timeout y códigos de salida. |
+| `src/main.cpp` | Parseo de CLI, orquestación de la ejecución (fork/exec, timeout a nivel de proceso) y ensamblado del resultado JSON. |
+| `src/prelude.cpp` | Prelude Roblox headless embebido (Lua) y closures nativas en C (`loadstring`, `type`, `typeof`, `iscclosure`, etc.) con registro de globals. |
+| `src/runtime.cpp` | Utilidades de ejecución: lectura de archivos, paso de argumentos, timeout cooperativo, modo `--sandbox` y `runScript`. |
+| `src/json.cpp` | Escapado de strings para la salida JSON. |
+| `src/lumora.h` | Declaraciones compartidas entre los módulos de C++. |
 | `vendor/luau` | Fuentes oficiales vendorizados de Luau, incluyendo VM, compilador y biblioteca común. |
 | `tests/` | Smoke tests, contratos de CLI, sintaxis moderna, API Roblox, jerarquía, señales y scheduling. |
 | `CMakeLists.txt` | Target C++17, integración de Luau, generación del ejecutable y registro de CTest. |
