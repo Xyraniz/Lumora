@@ -10,4 +10,4 @@ test: build
 	ctest --test-dir build --output-on-failure
 
 clean:
-	rm -rf build bin/luau-vm
+	rm -rf build bin/lumora bin/luau-vm

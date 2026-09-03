@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <limits>
+#include <cmath>
 #if defined(__unix__)
 #include <csignal>
 #include <sys/wait.h>
@@ -55,26 +57,47 @@ local function signal()
 end
 
 local instance_mt = { __metatable = "The metatable is locked" }
+local function removeChild(parent, child)
+    for i, value in ipairs(parent._children) do
+        if value == child then table.remove(parent._children, i); return end
+    end
+end
 instance_mt.__index = function(self, key)
+    if key == "Parent" then return rawget(self, "_parent") end
     if key == "GetChildren" then return function(obj) return obj._children end end
     if key == "FindFirstChild" then return function(obj, name) for _, c in ipairs(obj._children) do if c.Name == name then return c end end return nil end end
     if key == "WaitForChild" then return function(obj, name) return obj:FindFirstChild(name) or error("Infinite yield possible on '" .. obj:GetFullName() .. ":WaitForChild(" .. name .. ")'") end end
     if key == "GetService" then return function(obj, name) return obj._services[name] or Instance.new(name, obj) end end
     if key == "GetFullName" then return function(obj) local p=obj.Name; local q=obj.Parent; while q do p=q.Name.."."..p; q=q.Parent end return p end end
-    if key == "Destroy" then return function(obj) obj.Parent=nil end end
+    if key == "Destroy" then return function(obj)
+        if obj.Parent then obj.Parent = nil end
+        for _, child in ipairs(obj._children) do child.Parent = nil end
+        obj._destroyed = true
+    end end
     if key == "IsA" then return function(obj, n) return obj.ClassName == n or n == "Instance" end end
     if key == "GetAttribute" then return function(obj, n) return obj._attributes[n] end end
     if key == "SetAttribute" then return function(obj, n, v) obj._attributes[n]=v; obj.AttributeChanged:Fire(n) end end
     return rawget(self, key)
 end
 instance_mt.__newindex = function(self, key, value)
+    if key == "Parent" then
+        local old = rawget(self, "_parent")
+        if old == value then return end
+        if old then removeChild(old, self); old.ChildRemoved:Fire(self) end
+        rawset(self, "_parent", value)
+        if value then
+            removeChild(value, self)
+            table.insert(value._children, self)
+            value.ChildAdded:Fire(self)
+        end
+        return
+    end
     rawset(self, key, value)
-    if key == "Parent" and value then table.insert(value._children, self); value.ChildAdded:Fire(self) end
 end
 
 Instance = {}
 function Instance.new(className, parent)
-    local o = setmetatable({ ClassName=className, Name=className, Parent=nil, _children={}, _attributes={}, AttributeChanged=signal(), ChildAdded=signal(), ChildRemoved=signal() }, instance_mt)
+    local o = setmetatable({ ClassName=className, Name=className, _children={}, _attributes={}, AttributeChanged=signal(), ChildAdded=signal(), ChildRemoved=signal() }, instance_mt)
     if parent then o.Parent = parent end
     return o
 end
@@ -87,28 +110,82 @@ game = root
 workspace = root:GetService("Workspace")
 workspace.Name = "Workspace"
 
+local function enumValue(name)
+    local value = 0
+    for i = 1, #name do value = (value * 33 + string.byte(name, i)) % 2147483647 end
+    return value
+end
 Enum = setmetatable({}, { __index = function(_, enumName)
     local t = { Name=enumName, __type="EnumType", _items={} }
     rawset(_, enumName, t)
     function t:FromName(name) return self[name] end
     function t:FromValue(value) for _, item in ipairs(self._items) do if item.Value==value then return item end end return nil end
-    setmetatable(t, { __metatable="The metatable is locked", __index = function(e, item) local v=setmetatable({ Name=item, EnumType=e, Value=0, __type="EnumItem" }, { __tostring=function() return "Enum."..enumName.."."..item end }); rawset(e, item, v); table.insert(e._items, v); return v end, __tostring=function() return "Enum."..enumName end })
+    setmetatable(t, { __metatable="The metatable is locked", __index = function(e, item) local v=setmetatable({ Name=item, EnumType=e, Value=#e._items, __type="EnumItem" }, { __tostring=function() return "Enum."..enumName.."."..item end }); rawset(e, item, v); table.insert(e._items, v); return v end, __tostring=function() return "Enum."..enumName end })
     return t
 end })
 
-local function vec2(x,y) return setmetatable({X=x or 0,Y=y or 0}, {__index={Magnitude=math.sqrt((x or 0)^2+(y or 0)^2)}, __tostring=function(v) return string.format("%g, %g",v.X,v.Y) end}) end
+local function vec2(x,y)
+    return setmetatable({X=x or 0,Y=y or 0,__type="Vector2"}, {__index={Magnitude=math.sqrt((x or 0)^2+(y or 0)^2)}, __tostring=function(v) return string.format("%g, %g",v.X,v.Y) end})
+end
 Vector2 = { new=vec2 }
-UDim2 = { new=function(sx,ox,sy,oy) return {X={Scale=sx,Offset=ox},Y={Scale=sy,Offset=oy}} end, fromScale=function(x,y) return UDim2.new(x,0,y,0) end, fromOffset=function(x,y) return UDim2.new(0,x,0,y) end }
-Path2D = { new=function() return {ControlPoints={}} end }
+UDim2 = {
+    new=function(sx,ox,sy,oy) return {X={Scale=sx,Offset=ox},Y={Scale=sy,Offset=oy},__type="UDim2"} end,
+    fromScale=function(x,y) return UDim2.new(x,0,y,0) end,
+    fromOffset=function(x,y) return UDim2.new(0,x,0,y) end
+}
+Path2D = { new=function() return {ControlPoints={},__type="Path2D"} end }
 
 Random = {}
+local function mul32(a, b)
+    local a0 = bit32.band(a, 65535)
+    local a1 = math.floor(a / 65536)
+    local b0 = bit32.band(b, 65535)
+    local b1 = math.floor(b / 65536)
+    local p0 = a0 * b0
+    local p1 = a0 * b1 + a1 * b0
+    local lo = (p0 + bit32.band(p1, 65535) * 65536) % 4294967296
+    local hi = (math.floor(p0 / 4294967296) + math.floor(p1 / 65536) + a1 * b1) % 4294967296
+    return lo, hi
+end
+local function pcgNext(s)
+    local oldLo, oldHi = s.lo, s.hi
+    local lo, carry = mul32(oldLo, 0x4c957f2d)
+    local cross1 = mul32(oldLo, 0x5851f42d)
+    local cross2 = mul32(oldHi, 0x4c957f2d)
+    local highLo = (carry + cross1 + cross2) % 4294967296
+    lo = (lo + 105) % 4294967296
+    if lo < 105 then highLo = (highLo + 1) % 4294967296 end
+    s.lo, s.hi = lo, highLo
+    local shiftedLo = bit32.bor(bit32.rshift(oldLo, 18), bit32.lshift(bit32.band(oldHi, 0x3ffff), 14))
+    local shiftedHi = bit32.rshift(oldHi, 18)
+    local xlo = bit32.bxor(oldLo, shiftedLo)
+    local xhi = bit32.bxor(oldHi, shiftedHi)
+    local xorshifted = bit32.bor(bit32.rshift(xlo, 27), bit32.lshift(bit32.band(xhi, 0x7ffffff), 5))
+    return bit32.rrotate(xorshifted, bit32.rshift(oldHi, 27))
+end
 function Random.new(seed)
-    local state = (seed or os.time()) % 4294967296
-    local r = {}
-    local function next32() state = (1664525 * state + 1013904223) % 4294967296; return state end
-    function r:NextInteger(a,b) return a + (next32() % (b-a+1)) end
-    function r:NextNumber(a,b) a=a or 0; b=b or 1; return a + (next32()/4294967296)*(b-a) end
+    seed = math.floor(seed or os.time())
+    local s = {lo=0, hi=0}
+    pcgNext(s)
+    s.lo = (s.lo + seed % 4294967296) % 4294967296
+    s.hi = (s.hi + math.floor(seed / 4294967296)) % 4294967296
+    pcgNext(s)
+    local r = {_state=s}
+    function r:NextInteger(a,b)
+        a = assert(a, "missing argument #1 to 'NextInteger' (number expected)")
+        b = assert(b, "missing argument #2 to 'NextInteger' (number expected)")
+        local width = b - a + 1
+        assert(width > 0, "interval is empty")
+        return a + math.floor((pcgNext(self._state) / 4294967296) * width)
+    end
+    function r:NextNumber(a,b)
+        a = a or 0; b = b or 1
+        local lo, hi = pcgNext(self._state), pcgNext(self._state)
+        local value = (hi * 4294967296 + lo) / 18446744073709551616
+        return a + value * (b-a)
+    end
     function r:NextUnitVector() local a=self:NextNumber(0, math.pi*2); return vec2(math.cos(a),math.sin(a)) end
+    function r:Clone() local copy = Random.new(0); copy._state = {lo=self._state.lo, hi=self._state.hi}; return copy end
     return r
 end
 
@@ -117,7 +194,8 @@ function tasklib.spawn(fn, ...) local co=coroutine.create(fn); local ok,err=coro
 function tasklib.delay(_, fn, ...) return tasklib.spawn(fn, ...) end
 function tasklib.cancel(_) end
 function tasklib.wait(seconds) return seconds or 0 end
-task = tasklib
+function tasklib.defer(fn, ...) return tasklib.spawn(fn, ...) end
+ task = tasklib
 
 typeof = function(v) if type(v)=="table" and v.ClassName then return "Instance" elseif type(v)=="table" and v.__type then return v.__type elseif type(v)=="table" and v.X and v.Y then return "Vector2" else return type(v) end end
 iscclosure = function(f) return type(f)=="function" end
@@ -208,13 +286,28 @@ int main(int argc, char** argv)
         std::string option = argv[i];
         if (option == "--no-roblox") roblox = false;
         else if (option == "--json") json = true;
-        else if (option == "--timeout" && i + 1 < argc) timeout = std::stod(argv[++i]);
-        else if (!script) script = argv[i];
-        else scriptArgs.push_back(argv[i]);
+        else if (option == "--help" || option == "-h")
+        {
+            std::cout << "usage: lumora [--no-roblox] [--json] [--timeout seconds] script.lua [args...]\n";
+            return 0;
+        }
+        else if (option == "--version")
+        {
+            std::cout << "lumora 0.1.0\n";
+            return 0;
+        }
+        else if (option == "--timeout" && i + 1 < argc)
+        {
+            timeout = std::stod(argv[++i]);
+            if (!std::isfinite(timeout) || timeout < 0.0) throw std::invalid_argument("timeout must be a finite non-negative number");
+        }
+        else if (!script && option.rfind("--", 0) != 0) script = argv[i];
+        else if (script) scriptArgs.push_back(argv[i]);
+        else throw std::invalid_argument("unknown option: " + option);
     }
     if (!script)
     {
-        std::cerr << "usage: luau-vm [--no-roblox] [--json] [--timeout seconds] script.lua [args...]\n";
+        std::cerr << "usage: lumora [--no-roblox] [--json] [--timeout seconds] script.lua [args...]\n";
         return 2;
     }
 

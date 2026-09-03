@@ -11,23 +11,24 @@ set(LUAU_BUILD_WEB OFF CACHE BOOL "" FORCE)
 set(LUAU_WERROR OFF CACHE BOOL "" FORCE)
 add_subdirectory(vendor/luau EXCLUDE_FROM_ALL)
 
-add_executable(luau-vm src/main.cpp)
-target_link_libraries(luau-vm PRIVATE Luau.Compiler Luau.VM Luau.Common)
-target_include_directories(luau-vm PRIVATE vendor/luau/VM/include vendor/luau/Compiler/include)
+add_executable(lumora src/main.cpp)
+target_link_libraries(lumora PRIVATE Luau.Compiler Luau.VM Luau.Common)
+target_include_directories(lumora PRIVATE vendor/luau/VM/include vendor/luau/Compiler/include)
 
 if(UNIX)
-    target_link_libraries(luau-vm PRIVATE pthread dl m)
+    target_link_libraries(lumora PRIVATE pthread dl m)
 endif()
 
-add_custom_command(TARGET luau-vm POST_BUILD
+add_custom_command(TARGET lumora POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_SOURCE_DIR}/bin
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:luau-vm> ${CMAKE_SOURCE_DIR}/bin/luau-vm
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/bin/lumora
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/bin/luau-vm
 )
 
 include(CTest)
 if(BUILD_TESTING)
-    add_test(NAME smoke COMMAND ${CMAKE_SOURCE_DIR}/tests/smoke.sh $<TARGET_FILE:luau-vm>)
-    add_test(NAME roblox_api COMMAND $<TARGET_FILE:luau-vm> ${CMAKE_SOURCE_DIR}/tests/roblox_api.lua)
-    add_test(NAME cli_flags COMMAND ${CMAKE_SOURCE_DIR}/tests/cli_flags.sh $<TARGET_FILE:luau-vm>)
-    add_test(NAME luau_modern COMMAND $<TARGET_FILE:luau-vm> --no-roblox ${CMAKE_SOURCE_DIR}/tests/luau_modern.lua)
+    add_test(NAME smoke COMMAND ${CMAKE_SOURCE_DIR}/tests/smoke.sh $<TARGET_FILE:lumora>)
+    add_test(NAME roblox_api COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/roblox_api.lua)
+    add_test(NAME cli_flags COMMAND ${CMAKE_SOURCE_DIR}/tests/cli_flags.sh $<TARGET_FILE:lumora>)
+    add_test(NAME luau_modern COMMAND $<TARGET_FILE:lumora> --no-roblox ${CMAKE_SOURCE_DIR}/tests/luau_modern.lua)
 endif()
