@@ -120,18 +120,14 @@ Enum = setmetatable({ __type="Enums" }, { __metatable="The metatable is locked",
     rawset(_, enumName, t)
         function t:FromName(name) return self[name] end
     function t:FromValue(value) for _, item in ipairs(self._items) do if item.Value==value then return item end end return nil end
-    setmetatable(t, { __metatable="The metatable is locked", __index = function(e, item) local v=setmetatable({ Name=item, EnumType=e, Value=#e._items, __type="EnumItem" }, { __tostring=function() return "Enum."..enumName.."."..item end }); rawset(e, item, v); table.insert(e._items, v); return v end, __tostring=function() return "Enum."..enumName end })
+    setmetatable(t, { __metatable="The metatable is locked", __index = function(e, item) local v=setmetatable({ Name=item, EnumType=e, Value=#e._items, __type="EnumItem" }, { __metatable="The metatable is locked", __tostring=function() return "Enum."..enumName.."."..item end }); rawset(e, item, v); table.insert(e._items, v); return v end, __tostring=function() return "Enum."..enumName end })
     return t
 end })
 
-local builtin_type = type
-type = function(value)
-    if builtin_type(value) == "table" then
-        local marker = rawget(value, "__type")
-        if marker == "Instance" or marker == "Enums" or marker == "Enum" or marker == "EnumItem" then return "userdata" end
-    end
-    return builtin_type(value)
-end
+-- type and typeof are registered as native C functions by Lumora's
+-- registerRobloxGlobals so that anti-tamper checks which verify builtins
+-- are C closures pass correctly. The C implementation reads the __type
+-- marker that the Roblox prelude sets on emulated userdata objects.
 
 local function vec2(x,y)
     return setmetatable({X=x or 0,Y=y or 0,__type="Vector2"}, {__index={Magnitude=math.sqrt((x or 0)^2+(y or 0)^2)}, __tostring=function(v) return string.format("%g, %g",v.X,v.Y) end})
@@ -190,7 +186,13 @@ function Random.new(seed)
         b = assert(b, "missing argument #2 to 'NextInteger' (number expected)")
         local width = b - a + 1
         assert(width > 0, "interval is empty")
-        return a + math.floor((pcgNext(self._state) / 4294967296) * width)
+        -- Lemire's method: result = a + (width * pcgNext) >> 32
+        -- This matches Roblox's Random:NextInteger exactly. Using mul32
+        -- to get the high 32 bits of the 64-bit product avoids the
+        -- floating-point precision loss that floor(rnd/2^32 * width) suffers.
+        local rnd = pcgNext(self._state)
+        local _, hi = mul32(width, rnd)
+        return a + hi
     end
     function r:NextNumber(a,b)
         a = a or 0; b = b or 1
@@ -223,17 +225,59 @@ function tasklib.wait(seconds) return seconds or 0 end
 function tasklib.defer(fn, ...) return tasklib.spawn(fn, ...) end
  task = tasklib
 
-typeof = function(v) if builtin_type(v)=="table" and rawget(v, "ClassName") then return "Instance" elseif builtin_type(v)=="table" and rawget(v, "__type") then return rawget(v, "__type") elseif builtin_type(v)=="table" and rawget(v, "X") and rawget(v, "Y") then return "Vector2" else return builtin_type(v) end end
-iscclosure = function(f) return type(f)=="function" end
-islclosure = iscclosure
-newcclosure = function(f) assert(type(f)=="function", "function expected"); return f end
-clonefunction = function(f) assert(type(f)=="function", "function expected"); return f end
+-- typeof is registered as a native C function (see registerRobloxGlobals).
+iscclosure = iscclosure
+islclosure = islclosure
+newcclosure = newcclosure
+clonefunction = clonefunction
 getfenv = function(_) return _ENV end
 setfenv = function(_, env) return env end
 if not table.freeze then table.freeze=function(t) return t end end
 utf8.nfcnormalize = utf8.nfcnormalize or function(s) return s end
 utf8.nfdnormalize = utf8.nfdnormalize or function(s) return s end
 )LUA";
+
+// loadstring(source [, chunkName]) — mirrors the Roblox global. Compiles
+// Luau source to bytecode and loads it as a function. Returns (fn) on
+// success or (nil, errorMessage) on a compile error, matching the contract
+// that Fengetheus AntiTamper and general Roblox scripts rely on.
+static int lumora_loadstring(lua_State* L)
+{
+    const char* source = luaL_optstring(L, 1, "");
+    const char* chunkName = luaL_optstring(L, 2, "loadstring");
+
+    Luau::CompileOptions options;
+    options.optimizationLevel = 1;
+    options.debugLevel = 1;
+
+    std::string bytecode;
+    try
+    {
+        bytecode = Luau::compile(source, options);
+    }
+    catch (const std::exception&)
+    {
+        lua_pushnil(L);
+        lua_pushstring(L, "loadstring: compilation failed");
+        return 2;
+    }
+
+    // Luau::compile returns bytecode even on success, but a compile error
+    // is encoded as a #0 directive inside the bytecode. luau_load detects
+    // that and pushes an error string on the stack.
+    std::string chunkId = std::string("=") + chunkName;
+    if (luau_load(L, chunkId.c_str(), bytecode.data(), bytecode.size(), 0) != 0)
+    {
+        // luau_load already pushed an error string; replace it under nil
+        const char* err = lua_tostring(L, -1);
+        lua_pop(L, 1);
+        lua_pushnil(L);
+        lua_pushstring(L, err ? err : "loadstring: load failed");
+        return 2;
+    }
+
+    return 1;
+}
 
 static bool installPrelude(lua_State* L)
 {
@@ -242,6 +286,170 @@ static bool installPrelude(lua_State* L)
     if (luau_load(L, "=lumora.roblox", bytecode.data(), bytecode.size(), 0) != 0)
         return false;
     return lua_pcall(L, 0, 0, 0) == 0;
+}
+
+// Register native globals that Luau's base library intentionally omits
+// (loadstring, load) but that Roblox provides. Must be called after
+// luaL_openlibs and before the user script runs.
+
+// iscclosure(f) -> bool : true when f is a C closure, false for Lua closures.
+static int lumora_iscclosure(lua_State* L)
+{
+    luaL_checkany(L, 1);
+    lua_pushboolean(L, lua_iscfunction(L, 1));
+    return 1;
+}
+
+// islclosure(f) -> bool : the complement of iscclosure.
+static int lumora_islclosure(lua_State* L)
+{
+    luaL_checkany(L, 1);
+    lua_pushboolean(L, !lua_iscfunction(L, 1) && lua_isfunction(L, 1));
+    return 1;
+}
+
+// newcclosure(f) -> cFunction : wraps a Lua function in a C closure so that
+// iscclosure reports true. The upvalue at slot 1 carries the original fn.
+static int lumora_newcclosure_thunk(lua_State* L)
+{
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, lua_gettop(L) - 1, LUA_MULTRET);
+    return lua_gettop(L);
+}
+
+static int lumora_newcclosure(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    lua_pushcclosure(L, lumora_newcclosure_thunk, "newcclosure", 1);
+    return 1;
+}
+
+// clonefunction(f) -> function : returns a function with identical behaviour.
+// For C closures we return the same reference (they are immutable). For Lua
+// closures we also return the same reference — Luau does not expose a
+// bytecode-level clone, and identity is sufficient for anti-tamper checks
+// that verify clonefunction(pcall) still works.
+static int lumora_clonefunction(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    lua_pushvalue(L, 1);
+    return 1;
+}
+
+// Roblox-aware type(v) -> string. Identical to native Luau type() except that
+// tables carrying a __type marker of "Instance", "Enums", "Enum", or
+// "EnumItem" report "userdata", matching what real Roblox returns for its
+// native objects. Implemented as a C closure so anti-tamper C-closure
+// verification passes.
+static int lumora_type(lua_State* L)
+{
+    luaL_checkany(L, 1);
+    if (lua_type(L, 1) == LUA_TTABLE)
+    {
+        // Use rawget to avoid triggering __index metamethods on emulated
+        // userdata metatables (e.g. Enum's __index creates enum types).
+        lua_pushstring(L, "__type");
+        lua_rawget(L, 1);
+        if (lua_isstring(L, -1))
+        {
+            const char* marker = lua_tostring(L, -1);
+            if (strcmp(marker, "Instance") == 0 || strcmp(marker, "Enums") == 0 ||
+                strcmp(marker, "Enum") == 0 || strcmp(marker, "EnumItem") == 0)
+            {
+                lua_pushstring(L, "userdata");
+                return 1;
+            }
+        }
+        lua_pop(L, 1);
+    }
+    lua_pushstring(L, lua_typename(L, lua_type(L, 1)));
+    return 1;
+}
+
+// Roblox-aware typeof(v) -> string. Returns the __type marker for emulated
+// userdata, "Instance" for objects with a ClassName field, "Vector2" for
+// {X=,Y=} tables, and falls back to native type otherwise.
+static int lumora_typeof(lua_State* L)
+{
+    luaL_checkany(L, 1);
+    if (lua_type(L, 1) == LUA_TTABLE)
+    {
+        // Check ClassName first (Instance objects) — use rawget to avoid
+        // triggering __index metamethods on emulated userdata.
+        lua_pushstring(L, "ClassName");
+        lua_rawget(L, 1);
+        if (!lua_isnil(L, -1))
+        {
+            lua_pop(L, 1);
+            lua_pushstring(L, "Instance");
+            return 1;
+        }
+        lua_pop(L, 1);
+
+        // Check __type marker
+        lua_pushstring(L, "__type");
+        lua_rawget(L, 1);
+        if (lua_isstring(L, -1))
+        {
+            const char* marker = lua_tostring(L, -1);
+            if (strcmp(marker, "Instance") == 0 || strcmp(marker, "Enums") == 0 ||
+                strcmp(marker, "Enum") == 0 || strcmp(marker, "EnumItem") == 0 ||
+                strcmp(marker, "Vector2") == 0 || strcmp(marker, "UDim2") == 0 ||
+                strcmp(marker, "Path2D") == 0)
+            {
+                // Keep marker on stack, return it
+                return 1;
+            }
+        }
+        lua_pop(L, 1);
+
+        // Check for Vector2-like {X=, Y=}
+        lua_pushstring(L, "X");
+        lua_rawget(L, 1);
+        lua_pushstring(L, "Y");
+        lua_rawget(L, 1);
+        if (!lua_isnil(L, -2) && !lua_isnil(L, -1))
+        {
+            lua_pop(L, 2);
+            lua_pushstring(L, "Vector2");
+            return 1;
+        }
+        lua_pop(L, 2);
+    }
+    lua_pushstring(L, lua_typename(L, lua_type(L, 1)));
+    return 1;
+}
+
+static void registerRobloxGlobals(lua_State* L)
+{
+    lua_pushcfunction(L, lumora_loadstring, "loadstring");
+    lua_setglobal(L, "loadstring");
+
+    // load(source [, chunkName [, env]]) — Luau variant. We support the
+    // first two arguments and compile the same way as loadstring.
+    lua_pushcfunction(L, lumora_loadstring, "load");
+    lua_setglobal(L, "load");
+
+    lua_pushcfunction(L, lumora_iscclosure, "iscclosure");
+    lua_setglobal(L, "iscclosure");
+
+    lua_pushcfunction(L, lumora_islclosure, "islclosure");
+    lua_setglobal(L, "islclosure");
+
+    lua_pushcfunction(L, lumora_newcclosure, "newcclosure");
+    lua_setglobal(L, "newcclosure");
+
+    lua_pushcfunction(L, lumora_clonefunction, "clonefunction");
+    lua_setglobal(L, "clonefunction");
+
+    // Roblox-aware type/typeof implemented as C closures so that anti-tamper
+    // checks verifying builtins are C closures pass correctly.
+    lua_pushcfunction(L, lumora_type, "type");
+    lua_setglobal(L, "type");
+
+    lua_pushcfunction(L, lumora_typeof, "typeof");
+    lua_setglobal(L, "typeof");
 }
 
 static double g_timeoutSeconds = 0.0;
@@ -268,6 +476,8 @@ static int runScript(const char* path, int argc, char** argv, bool roblox, doubl
         std::cerr << lua_tostring(L, -1) << "\\n";
         lua_close(L); return 70;
     }
+    if (roblox)
+        registerRobloxGlobals(L);
     g_timeoutSeconds = timeout;
     g_started = std::chrono::steady_clock::now();
     if (timeout > 0.0) lua_callbacks(L)->interrupt = timeoutInterrupt;
