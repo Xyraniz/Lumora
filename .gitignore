@@ -1,0 +1,4 @@
+build/
+bin/luau-vm
+.vscode/
+.idea/

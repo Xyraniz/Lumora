@@ -54,7 +54,7 @@ local function signal()
     return s
 end
 
-local instance_mt = {}
+local instance_mt = { __metatable = "The metatable is locked" }
 instance_mt.__index = function(self, key)
     if key == "GetChildren" then return function(obj) return obj._children end end
     if key == "FindFirstChild" then return function(obj, name) for _, c in ipairs(obj._children) do if c.Name == name then return c end end return nil end end
