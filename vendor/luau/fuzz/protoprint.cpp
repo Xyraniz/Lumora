@@ -1,0 +1,1542 @@
+// This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
+#include "luau.pb.h"
+
+#include <optional>
+
+static const std::string kNames[] = {
+    "_G",
+    "_VERSION",
+    "__add",
+    "__call",
+    "__concat",
+    "__div",
+    "__eq",
+    "__idiv",
+    "__index",
+    "__iter",
+    "__le",
+    "__len",
+    "__lt",
+    "__mod",
+    "__mode",
+    "__mul",
+    "__namecall",
+    "__newindex",
+    "__pow",
+    "__sub",
+    "__type",
+    "__unm",
+    "abs",
+    "acos",
+    "arshift",
+    "asin",
+    "assert",
+    "atan",
+    "atan2",
+    "band",
+    "bit32",
+    "bnot",
+    "boolean",
+    "bor",
+    "btest",
+    "buffer",
+    "bxor",
+    "byte",
+    "ceil",
+    "char",
+    "charpattern",
+    "clamp",
+    "clear",
+    "clock",
+    "clone",
+    "close",
+    "codepoint",
+    "codes",
+    "collectgarbage",
+    "concat",
+    "copy",
+    "coroutine",
+    "cos",
+    "cosh",
+    "countlz",
+    "countrz",
+    "create",
+    "date",
+    "debug",
+    "deg",
+    "difftime",
+    "error",
+    "exp",
+    "extract",
+    "fill",
+    "find",
+    "floor",
+    "fmod",
+    "foreach",
+    "foreachi",
+    "format",
+    "freeze",
+    "frexp",
+    "fromstring",
+    "function",
+    "gcinfo",
+    "getfenv",
+    "getmetatable",
+    "getn",
+    "gmatch",
+    "gsub",
+    "huge",
+    "info",
+    "insert",
+    "ipairs",
+    "isfrozen",
+    "isyieldable",
+    "ldexp",
+    "len",
+    "loadstring",
+    "log",
+    "log10",
+    "lower",
+    "lrotate",
+    "lshift",
+    "match",
+    "math",
+    "max",
+    "maxn",
+    "min",
+    "modf",
+    "move",
+    "newproxy",
+    "next",
+    "nil",
+    "noise",
+    "number",
+    "offset",
+    "os",
+    "pack",
+    "packsize",
+    "pairs",
+    "pcall",
+    "pi",
+    "pow",
+    "print",
+    "rad",
+    "random",
+    "randomseed",
+    "rawequal",
+    "rawget",
+    "rawlen",
+    "rawset",
+    "readf32",
+    "readf64",
+    "readi16",
+    "readi32",
+    "readi8",
+    "readstring",
+    "readu16",
+    "readu32",
+    "readu8",
+    "remove",
+    "rep",
+    "replace",
+    "require",
+    "resume",
+    "reverse",
+    "round",
+    "rrotate",
+    "rshift",
+    "running",
+    "select",
+    "setfenv",
+    "setmetatable",
+    "sign",
+    "sin",
+    "sinh",
+    "sort",
+    "split",
+    "sqrt",
+    "status",
+    "string",
+    "sub",
+    "table",
+    "tan",
+    "tanh",
+    "thread",
+    "time",
+    "tonumber",
+    "tostring",
+    "tostring",
+    "traceback",
+    "type",
+    "typeof",
+    "unpack",
+    "upper",
+    "userdata",
+    "utf8",
+    "vector",
+    "wrap",
+    "writef32",
+    "writef64",
+    "writei16",
+    "writei32",
+    "writei8",
+    "writestring",
+    "writeu16",
+    "writeu32",
+    "writeu8",
+    "xpcall",
+    "yield",
+    "types",
+    "unknown",
+    "never",
+    "any",
+    "singleton",
+    "optional",
+    "generic",
+    "negationof",
+    "unionof",
+    "intersectionof",
+    "newtable",
+    "newfunction",
+    "integer",
+    "neg",
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "rem",
+    "idiv",
+    "mod",
+    "udiv",
+    "urem",
+    "lt",
+    "le",
+    "gt",
+    "ge",
+    "ult",
+    "ule",
+    "ugt",
+    "uge",
+    "readinteger",
+    "writeinteger",
+    "mininteger",
+    "maxinteger",
+};
+
+static const std::string kTypes[] = {
+    "any",
+    "boolean",
+    "buffer",
+    "nil",
+    "number",
+    "integer",
+    "string",
+    "thread",
+    "vector",
+    "unknown",
+    "never",
+};
+
+static const std::string kExternTypes[] = {
+    "Vector3",
+    "Instance",
+    "Part",
+};
+
+static const std::string kBuiltinTypes[] = {
+    "len", "unm", "add", "sub",   "mul",      "div",   "idiv",   "pow",          "mod",          "concat",
+    "lt",  "le",  "eq",  "keyof", "rawkeyof", "index", "rawget", "setmetatable", "getmetatable",
+};
+
+static const std::string kValidClassMetamethods[] = {
+    "__call",
+    "__concat",
+    "__unm",
+    "__add",
+    "__sub",
+    "__mul",
+    "__div",
+    "__idiv",
+    "__mod",
+    "__pow",
+    "__tostring",
+    "__eq",
+    "__lt",
+    "__le",
+    "__len",
+    "__iter"
+};
+
+struct BuiltinLibrary
+{
+    const char* name;
+    const std::vector<std::string> methods;
+};
+
+static const BuiltinLibrary kBuiltinLibraries[] = {
+    {"math", {"abs",    "acos",       "asin",  "atan", "atan2", "ceil",  "clamp", "cos", "cosh", "deg",   "exp",   "floor",
+              "fmod",   "frexp",      "ldexp", "lerp", "log",   "log10", "max",   "min", "modf", "noise", "pow",   "rad",
+              "random", "randomseed", "round", "sign", "sin",   "sinh",  "sqrt",  "tan", "tanh", "isnan", "isinf", "isfinite"}},
+    {"bit32",
+     {"arshift",
+      "band",
+      "bnot",
+      "bor",
+      "btest",
+      "bxor",
+      "byteswap",
+      "countlz",
+      "countrz",
+      "extract",
+      "lrotate",
+      "lshift",
+      "replace",
+      "rrotate",
+      "rshift"}},
+    {"string", {"byte", "char", "find", "format", "gmatch", "gsub", "len", "lower", "match", "rep", "reverse", "split", "sub", "upper"}},
+    {"table", {"clear", "clone", "concat", "create", "find", "freeze", "insert", "isfrozen", "maxn", "move", "remove", "sort", "unpack"}},
+    {"buffer", {"create",  "fromstring", "len",     "tostring", "copy",       "fill",        "readi8",      "readu8",      "writei8",
+                "writeu8", "readi16",    "readu16", "writei16", "writeu16",   "readi32",     "readu32",     "writei32",    "writeu32",
+                "readf32", "writef32",   "readf64", "writef64", "readstring", "writestring", "readinteger", "writeinteger"}},
+    {"coroutine", {"close", "create", "isyieldable", "resume", "running", "status", "wrap", "yield"}},
+    {"os", {"clock", "date", "difftime", "time"}},
+    {"utf8", {"char", "codepoint", "codes", "len", "offset", "charpattern", "graphemes"}},
+    {"vector", {"create", "magnitude", "normalize", "cross", "dot", "floor", "ceil", "abs", "sign", "clamp", "min", "max", "lerp"}},
+    {"integer", {"add", "sub",  "mul",    "div",    "idiv",    "udiv",    "mod",     "rem",     "urem",    "neg",     "create",  "clamp", "min",
+                 "max", "band", "bor",    "bxor",   "bnot",    "btest",   "bswap",   "lt",      "le",      "gt",      "ge",      "ult",   "ule",
+                 "ugt", "uge",  "lshift", "rshift", "arshift", "lrotate", "rrotate", "countlz", "countrz", "extract", "tonumber"}},
+};
+
+struct ProtoToLuau
+{
+    struct Function
+    {
+        int loops = 0;
+        bool vararg = false;
+    };
+
+    struct Class
+    {
+        const luau::Local* name;
+        std::vector<const luau::Name*> props;
+    };
+
+    std::string source = "open class _ end\n";
+    std::vector<Function> functions;
+    std::vector<Class> classes;
+    bool types = false;
+    int blockDepth = -1;
+
+    ProtoToLuau()
+    {
+        Function top = {};
+        top.vararg = true;
+        functions.push_back(top);
+    }
+
+    std::string displayName(const luau::Name& name)
+    {
+        if (name.has_builtin())
+        {
+            size_t index = size_t(name.builtin()) % std::size(kNames);
+            return kNames[index];
+        }
+        else if (name.has_custom())
+        {
+            return 'n' + std::to_string(name.custom() & 0xff);
+        }
+        else
+        {
+            return "_";
+        }
+    }
+
+    void ident(const luau::Name& name)
+    {
+        source += displayName(name);
+    }
+
+    void ident(const luau::RegularTypeName& name)
+    {
+        source += 't';
+        source += std::to_string(name.index() & 0xff);
+    }
+
+    void ident(const luau::GenericTypeName& name)
+    {
+        source += char('A' + (name.index() % 26));
+    }
+
+    void ident(const luau::BuiltinTypeName& name)
+    {
+        size_t index = size_t(name.index()) % std::size(kBuiltinTypes);
+        source += kBuiltinTypes[index];
+    }
+
+    void ident(const luau::TypeName& name)
+    {
+        if (name.has_regular())
+            ident(name.regular());
+        else if (name.has_generic())
+            ident(name.generic());
+        else if (name.has_builtin())
+            ident(name.builtin());
+        else
+            source += "any";
+    }
+
+    template<typename T>
+    void genericidents(const T& node)
+    {
+        if (node.generics_size() || node.genericpacks_size())
+        {
+            source += '<';
+            bool first = true;
+
+            for (size_t i = 0; i < node.generics_size(); ++i)
+            {
+                if (!first)
+                    source += ',';
+                first = false;
+                ident(node.generics(i));
+            }
+
+            for (size_t i = 0; i < node.genericpacks_size(); ++i)
+            {
+                if (!first)
+                    source += ',';
+                first = false;
+                ident(node.genericpacks(i));
+                source += "...";
+            }
+
+            source += '>';
+        }
+    }
+
+    void print(const luau::Expr& expr)
+    {
+        if (expr.has_group())
+            print(expr.group());
+        else if (expr.has_nil())
+            print(expr.nil());
+        else if (expr.has_bool_())
+            print(expr.bool_());
+        else if (expr.has_number())
+            print(expr.number());
+        else if (expr.has_integer())
+            print(expr.integer());
+        else if (expr.has_string())
+            print(expr.string());
+        else if (expr.has_local())
+            print(expr.local());
+        else if (expr.has_global())
+            print(expr.global());
+        else if (expr.has_varargs())
+            print(expr.varargs());
+        else if (expr.has_call())
+            print(expr.call());
+        else if (expr.has_index_name())
+            print(expr.index_name());
+        else if (expr.has_index_expr())
+            print(expr.index_expr());
+        else if (expr.has_function())
+            print(expr.function());
+        else if (expr.has_table())
+            print(expr.table());
+        else if (expr.has_unary())
+            print(expr.unary());
+        else if (expr.has_binary())
+            print(expr.binary());
+        else if (expr.has_ifelse())
+            print(expr.ifelse());
+        else if (expr.has_interpstring())
+            print(expr.interpstring());
+        else if (expr.has_builtin_ref())
+            print(expr.builtin_ref());
+        else
+            source += "_";
+    }
+
+    void print(const luau::ExprPrefix& expr)
+    {
+        if (expr.has_group())
+            print(expr.group());
+        else if (expr.has_local())
+            print(expr.local());
+        else if (expr.has_global())
+            print(expr.global());
+        else if (expr.has_call())
+            print(expr.call());
+        else if (expr.has_index_name())
+            print(expr.index_name());
+        else if (expr.has_index_expr())
+            print(expr.index_expr());
+        else if (expr.has_builtin_ref())
+            print(expr.builtin_ref());
+        else
+            source += "_";
+    }
+
+    void print(const luau::ExprGroup& expr)
+    {
+        source += '(';
+        print(expr.expr());
+        source += ')';
+    }
+
+    void print(const luau::ExprConstantNil& expr)
+    {
+        source += "nil";
+    }
+
+    void print(const luau::ExprConstantBool& expr)
+    {
+        source += expr.val() ? "true" : "false";
+    }
+
+    void print(const luau::ExprConstantNumber& expr)
+    {
+        source += std::to_string(expr.val());
+    }
+
+    void print(const luau::ExprConstantInteger& expr)
+    {
+        source += std::to_string(expr.val()) + "i";
+    }
+
+    void print(const luau::ExprConstantString& expr)
+    {
+        source += '"';
+        for (char ch : expr.val())
+            if (isalpha(ch))
+                source += ch;
+        source += '"';
+    }
+
+    void print(const luau::Local& var)
+    {
+        source += 'l';
+        source += std::to_string(var.name() & 0xff);
+    }
+
+    void print(const luau::ExprLocal& expr)
+    {
+        print(expr.var());
+    }
+
+    void print(const luau::ExprGlobal& expr)
+    {
+        ident(expr.name());
+    }
+
+    void print(const luau::ExprVarargs& expr)
+    {
+        if (functions.back().vararg)
+            source += "...";
+        else
+            source += "_";
+    }
+
+    void print(const luau::ParenCall& expr)
+    {
+        if (expr.func().has_index_name())
+            print(expr.func().index_name(), expr.self());
+        else
+            print(expr.func());
+        source += '(';
+        for (int i = 0; i < expr.args_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(expr.args(i));
+        }
+        source += ')';
+    }
+
+    void print(const luau::ParenlessCall& expr)
+    {
+        print(expr.func());
+        source += ' ';
+        if (expr.has_string())
+            print(expr.string());
+        else if (expr.has_table())
+            print(expr.table());
+        else
+            source += "{ }";
+    }
+
+    void print(const luau::ExprCall& expr)
+    {
+        if (expr.has_paren())
+            print(expr.paren());
+        else
+            print(expr.parenless());
+    }
+
+    void print(const luau::ExprIndexName& expr, bool self = false)
+    {
+        print(expr.expr());
+        source += self ? ':' : '.';
+        ident(expr.index());
+    }
+
+    void print(const luau::ExprIndexExpr& expr)
+    {
+        print(expr.expr());
+        source += '[';
+        print(expr.index());
+        source += ']';
+    }
+
+    void function(const luau::ExprFunction& expr)
+    {
+        genericidents(expr);
+        source += "(";
+        for (int i = 0; i < expr.args_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(expr.args(i));
+
+            if (types && i < expr.types_size())
+            {
+                source += ':';
+                print(expr.types(i));
+            }
+        }
+        if (expr.vararg())
+        {
+            if (expr.args_size())
+                source += ',';
+            source += "...";
+        }
+        source += ')';
+        if (types && expr.rettypes_size())
+        {
+            source += ':';
+            if (expr.rettypes_size() > 1)
+                source += '(';
+            for (size_t i = 0; i < expr.rettypes_size(); ++i)
+            {
+                if (i != 0)
+                    source += ',';
+                print(expr.rettypes(i));
+            }
+            if (expr.rettypes_size() > 1)
+                source += ')';
+        }
+        source += '\n';
+
+        Function func = {};
+        func.vararg = expr.vararg();
+        functions.push_back(func);
+
+        print(expr.body());
+
+        functions.pop_back();
+
+        source += "end";
+    }
+
+    void print(const luau::ExprFunction& expr)
+    {
+        for (size_t i = 0; i < expr.attributes_size(); ++i)
+        {
+            print(expr.attributes(i));
+            source += "\n";
+        }
+        source += "function";
+        function(expr);
+    }
+
+    void print(const luau::ExprTable& expr)
+    {
+        source += '{';
+        for (int i = 0; i < expr.items_size(); ++i)
+        {
+            if (expr.items(i).has_key_name())
+            {
+                ident(expr.items(i).key_name());
+                source += '=';
+            }
+            else if (expr.items(i).has_key_expr())
+            {
+                source += "[";
+                print(expr.items(i).key_expr());
+                source += "]=";
+            }
+
+            print(expr.items(i).value());
+            source += ',';
+        }
+        source += '}';
+    }
+
+    void print(const luau::ExprUnary& expr)
+    {
+        if (expr.op() == luau::ExprUnary::Not)
+            source += "not ";
+        else if (expr.op() == luau::ExprUnary::Minus)
+            source += "- ";
+        else if (expr.op() == luau::ExprUnary::Len)
+            source += "# ";
+
+        print(expr.expr());
+    }
+
+    void print(const luau::ExprBinary& expr)
+    {
+        print(expr.left());
+
+        if (expr.op() == luau::ExprBinary::Add)
+            source += " + ";
+        else if (expr.op() == luau::ExprBinary::Sub)
+            source += " - ";
+        else if (expr.op() == luau::ExprBinary::Mul)
+            source += " * ";
+        else if (expr.op() == luau::ExprBinary::Div)
+            source += " / ";
+        else if (expr.op() == luau::ExprBinary::FloorDiv)
+            source += " // ";
+        else if (expr.op() == luau::ExprBinary::Mod)
+            source += " % ";
+        else if (expr.op() == luau::ExprBinary::Pow)
+            source += " ^ ";
+        else if (expr.op() == luau::ExprBinary::Concat)
+            source += " .. ";
+        else if (expr.op() == luau::ExprBinary::CompareNe)
+            source += " ~= ";
+        else if (expr.op() == luau::ExprBinary::CompareEq)
+            source += " == ";
+        else if (expr.op() == luau::ExprBinary::CompareLt)
+            source += " < ";
+        else if (expr.op() == luau::ExprBinary::CompareLe)
+            source += " <= ";
+        else if (expr.op() == luau::ExprBinary::CompareGt)
+            source += " > ";
+        else if (expr.op() == luau::ExprBinary::CompareGe)
+            source += " >= ";
+        else if (expr.op() == luau::ExprBinary::And)
+            source += " and ";
+        else if (expr.op() == luau::ExprBinary::Or)
+            source += " or ";
+
+        print(expr.right());
+    }
+
+    void print(const luau::ExprIfElse& expr)
+    {
+        source += "if ";
+        print(expr.cond());
+        source += " then ";
+        print(expr.then());
+
+        if (expr.has_else_())
+        {
+            source += " else ";
+            print(expr.else_());
+        }
+        else if (expr.has_elseif())
+        {
+            source += " else";
+            print(expr.elseif());
+        }
+    }
+
+    void print(const luau::ExprInterpString& expr)
+    {
+        source += "`";
+
+        for (int i = 0; i < expr.parts_size(); ++i)
+        {
+            if (expr.parts(i).has_string())
+            {
+                // String literal is added surrounded with "", but that's ok
+                print(expr.parts(i));
+            }
+            else
+            {
+                source += "{";
+                print(expr.parts(i));
+                source += "}";
+            }
+        }
+
+        source += "`";
+    }
+
+    void print(const luau::ExprClassInst& expr, std::optional<size_t> classIndex = std::nullopt)
+    {
+        if (classes.size() == 0)
+            source += "_.new() { }";
+
+        size_t index = classIndex.value_or(size_t(expr.index()) % classes.size());
+        const Class& cls = classes[index];
+
+        print(*cls.name);
+
+        source += ".new { ";
+
+        const int generatedArgsSize = 1 + expr.otherargs_size();
+        for (int i = 0; i < int(cls.props.size()); ++i)
+        {
+            if (i != 0)
+                source += ", ";
+
+            ident(*cls.props[i]);
+
+            source += " = ";
+
+            int generatedArgIndex = i % generatedArgsSize;
+            if (generatedArgIndex == 0)
+                print(expr.firstarg());
+            else
+                print(expr.otherargs(generatedArgIndex - 1));
+        }
+
+        source += " }";
+    }
+
+    void print(const luau::ExprBuiltinRef& expr)
+    {
+        size_t libIndex = size_t(expr.library()) % std::size(kBuiltinLibraries);
+        const BuiltinLibrary& lib = kBuiltinLibraries[libIndex];
+        const auto& methods = lib.methods;
+        size_t methodIndex = size_t(expr.method()) % methods.size();
+        source += lib.name;
+        source += '.';
+        source += methods[methodIndex];
+    }
+
+    void print(const luau::LValue& expr)
+    {
+        if (expr.has_local())
+            print(expr.local());
+        else if (expr.has_global())
+            print(expr.global());
+        else if (expr.has_index_name())
+            print(expr.index_name());
+        else if (expr.has_index_expr())
+            print(expr.index_expr());
+        else
+            source += "_";
+    }
+
+    void print(const luau::Stat& stat)
+    {
+        if (stat.has_block())
+            print(stat.block());
+        else if (stat.has_if_())
+            print(stat.if_());
+        else if (stat.has_while_())
+            print(stat.while_());
+        else if (stat.has_repeat())
+            print(stat.repeat());
+        else if (stat.has_break_())
+            print(stat.break_());
+        else if (stat.has_continue_())
+            print(stat.continue_());
+        else if (stat.has_return_())
+            print(stat.return_());
+        else if (stat.has_call())
+            print(stat.call());
+        else if (stat.has_local())
+            print(stat.local());
+        else if (stat.has_for_())
+            print(stat.for_());
+        else if (stat.has_for_in())
+            print(stat.for_in());
+        else if (stat.has_assign())
+            print(stat.assign());
+        else if (stat.has_compound_assign())
+            print(stat.compound_assign());
+        else if (stat.has_function())
+            print(stat.function());
+        else if (stat.has_local_function())
+            print(stat.local_function());
+        else if (stat.has_type_alias())
+            print(stat.type_alias());
+        else if (stat.has_require_into_local())
+            print(stat.require_into_local());
+        else if (stat.has_type_function())
+            print(stat.type_function());
+        else if (stat.has_class_())
+            print(stat.class_());
+        else
+            source += "do end\n";
+    }
+
+    void print(const luau::StatBlock& stat)
+    {
+        blockDepth++;
+        for (int i = 0; i < stat.body_size(); ++i)
+        {
+            if (stat.body(i).has_block())
+            {
+                source += "do\n";
+                print(stat.body(i));
+                source += "end\n";
+            }
+            else if (stat.body(i).has_class_() && blockDepth != 0)
+                continue; // Class declarations are only allowed at the top level
+            else
+            {
+                print(stat.body(i));
+
+                // parser will reject code with break/continue/return being non-trailing statements in a block
+                if (stat.body(i).has_break_() || stat.body(i).has_continue_() || stat.body(i).has_return_())
+                    break;
+            }
+        }
+        blockDepth--;
+    }
+
+    void print(const luau::StatIf& stat)
+    {
+        source += "if ";
+        print(stat.cond());
+        source += " then\n";
+        print(stat.then());
+
+        if (stat.has_else_())
+        {
+            source += "else\n";
+            print(stat.else_());
+            source += "end\n";
+        }
+        else if (stat.has_elseif())
+        {
+            source += "else";
+            print(stat.elseif());
+        }
+        else
+        {
+            source += "end\n";
+        }
+    }
+
+    void print(const luau::StatWhile& stat)
+    {
+        source += "while ";
+        print(stat.cond());
+        source += " do\n";
+
+        functions.back().loops++;
+        print(stat.body());
+        functions.back().loops--;
+
+        source += "end\n";
+    }
+
+    void print(const luau::StatRepeat& stat)
+    {
+        source += "repeat\n";
+
+        functions.back().loops++;
+        print(stat.body());
+        functions.back().loops--;
+
+        source += "until ";
+        print(stat.cond());
+        source += "\n";
+    }
+
+    void print(const luau::StatBreak& stat)
+    {
+        if (functions.back().loops)
+            source += "break\n";
+        else
+            source += "do end\n";
+    }
+
+    void print(const luau::StatContinue& stat)
+    {
+        if (functions.back().loops)
+            source += "continue\n";
+        else
+            source += "do end\n";
+    }
+
+    void print(const luau::StatReturn& stat)
+    {
+        source += "return ";
+        for (int i = 0; i < stat.list_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(stat.list(i));
+        }
+        source += "\n";
+    }
+
+    void print(const luau::StatCall& stat)
+    {
+        print(stat.expr());
+        source += '\n';
+    }
+
+    void print(const luau::StatLocal& stat)
+    {
+        if (stat.is_exported())
+            source += "export ";
+
+        if (stat.is_const())
+            source += "const ";
+        else
+            source += "local ";
+
+        if (stat.vars_size() == 0)
+            source += '_';
+
+        for (int i = 0; i < stat.vars_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(stat.vars(i));
+
+            if (types && i < stat.types_size())
+            {
+                source += ':';
+                print(stat.types(i));
+            }
+        }
+
+        if (stat.values_size() != 0)
+            source += " = ";
+
+        for (int i = 0; i < stat.values_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(stat.values(i));
+        }
+        source += '\n';
+    }
+
+    void print(const luau::StatFor& stat)
+    {
+        source += "for ";
+        print(stat.var());
+        source += '=';
+        print(stat.from());
+        source += ',';
+        print(stat.to());
+        if (stat.has_step())
+        {
+            source += ',';
+            print(stat.step());
+        }
+        source += " do\n";
+
+        functions.back().loops++;
+        print(stat.body());
+        functions.back().loops--;
+
+        source += "end\n";
+    }
+
+    void print(const luau::StatForIn& stat)
+    {
+        source += "for ";
+
+        if (stat.vars_size() == 0)
+            source += '_';
+
+        for (int i = 0; i < stat.vars_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(stat.vars(i));
+        }
+
+        source += " in ";
+
+        if (stat.values_size() == 0)
+            source += "...";
+
+        for (int i = 0; i < stat.values_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(stat.values(i));
+        }
+
+        source += " do\n";
+
+        functions.back().loops++;
+        print(stat.body());
+        functions.back().loops--;
+
+        source += "end\n";
+    }
+
+    void print(const luau::StatAssign& stat)
+    {
+        if (stat.vars_size() == 0)
+            source += '_';
+
+        for (int i = 0; i < stat.vars_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(stat.vars(i));
+        }
+
+        source += " = ";
+
+        if (stat.values_size() == 0)
+            source += "nil";
+
+        for (int i = 0; i < stat.values_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(stat.values(i));
+        }
+        source += '\n';
+    }
+
+    void print(const luau::StatCompoundAssign& stat)
+    {
+        print(stat.var());
+
+        if (stat.op() == luau::StatCompoundAssign::Add)
+            source += " += ";
+        else if (stat.op() == luau::StatCompoundAssign::Sub)
+            source += " -= ";
+        else if (stat.op() == luau::StatCompoundAssign::Mul)
+            source += " *= ";
+        else if (stat.op() == luau::StatCompoundAssign::Div)
+            source += " /= ";
+        else if (stat.op() == luau::StatCompoundAssign::Mod)
+            source += " %= ";
+        else if (stat.op() == luau::StatCompoundAssign::Pow)
+            source += " ^= ";
+        else if (stat.op() == luau::StatCompoundAssign::Concat)
+            source += " ..= ";
+
+        print(stat.value());
+        source += '\n';
+    }
+
+    void print(const luau::StatFunction& stat)
+    {
+        source += "function ";
+        if (stat.var().has_index_name())
+            print(stat.var().index_name(), stat.self());
+        else if (stat.var().has_index_expr())
+            source += '_'; // function foo[bar]() is invalid syntax
+        else
+            print(stat.var());
+        function(stat.func());
+        source += '\n';
+    }
+
+    void print(const luau::StatLocalFunction& stat)
+    {
+        if (stat.is_exported())
+            source += "export function ";
+        else if (stat.is_const())
+            source += "const function ";
+        else
+            source += "local function ";
+
+        print(stat.var());
+        function(stat.func());
+        source += '\n';
+    }
+
+    void print(const luau::StatTypeAlias& stat)
+    {
+        if (stat.export_())
+            source += "export ";
+
+        source += "type ";
+        ident(stat.name());
+        genericidents(stat);
+        source += " = ";
+        print(stat.type());
+        source += '\n';
+    }
+
+    void print(const luau::StatRequireIntoLocalHelper& stat)
+    {
+        source += "local ";
+        print(stat.var());
+        source += " = require(module" + std::to_string(stat.modulenum() % 2) + ")\n";
+    }
+
+    void print(const luau::StatTypeFunction& stat)
+    {
+        for (size_t i = 0; i < stat.func().attributes_size(); ++i)
+        {
+            print(stat.func().attributes(i));
+            source += "\n";
+        }
+
+        if (stat.export_())
+            source += "export ";
+
+        source += "type function ";
+        ident(stat.name());
+        function(stat.func());
+        source += '\n';
+    }
+
+    void print(const luau::ClassProp& prop)
+    {
+        source += "public ";
+        ident(prop.name());
+
+        if (prop.has_type())
+        {
+            source += ':';
+            print(prop.type());
+        }
+    }
+
+    void print(const luau::ClassMetamethodName& metamethod)
+    {
+        size_t index = size_t(metamethod.index()) % std::size(kValidClassMetamethods);
+        source += kValidClassMetamethods[index];
+    }
+
+    void print(const luau::ClassMethod& method)
+    {
+        if (method.has_access())
+        {
+            // TODO: once we add more modifiers, add a helper to print access
+            if (method.access() == luau::Modifier::PUBLIC)
+                source += "public ";
+        }
+        source += "function ";
+
+        if (method.has_name())
+            ident(method.name());
+        else if (method.has_metamethod())
+            print(method.metamethod());
+
+        function(method.func());
+    }
+
+    void print(const luau::StatClass& stat)
+    {
+        if (stat.is_exported())
+            source += "export ";
+
+        if (stat.is_open())
+            source += "open ";
+
+        source += "class ";
+        print(stat.name());
+
+        if (stat.has_extends())
+        {
+            source += " extends ";
+            if (classes.size() == 0)
+                source += "_";
+            else
+                print(*classes[size_t(stat.extends()) % classes.size()].name);
+        }
+
+        source += '\n';
+
+        std::vector<const luau::Name*> propNames;
+
+        for (size_t i = 0; i < stat.props_size(); ++i)
+        {
+            const luau::ClassProp& prop = stat.props(i);
+            propNames.emplace_back(&prop.name());
+            print(prop);
+            source += '\n';
+        }
+
+        for (size_t i = 0; i < stat.methods_size(); ++i)
+        {
+            print(stat.methods(i));
+            source += '\n';
+        }
+
+        source += "end\n";
+
+        classes.emplace_back(Class{&stat.name(), std::move(propNames)});
+
+        print(stat.local());
+        source += " = ";
+        print(stat.inst(), classes.size() - 1);
+        source += '\n';
+    }
+
+    void print(const luau::Type& type)
+    {
+        if (type.has_primitive())
+            print(type.primitive());
+        else if (type.has_literal())
+            print(type.literal());
+        else if (type.has_table())
+            print(type.table());
+        else if (type.has_function())
+            print(type.function());
+        else if (type.has_typeof())
+            print(type.typeof());
+        else if (type.has_union_())
+            print(type.union_());
+        else if (type.has_intersection())
+            print(type.intersection());
+        else if (type.has_extern_())
+            print(type.extern_());
+        else if (type.has_ref())
+            print(type.ref());
+        else if (type.has_boolean())
+            print(type.boolean());
+        else if (type.has_string())
+            print(type.string());
+        else
+            source += "any";
+    }
+
+    void print(const luau::TypePrimitive& type)
+    {
+        size_t index = size_t(type.kind()) % std::size(kTypes);
+        source += kTypes[index];
+    }
+
+    void print(const luau::TypeLiteral& type)
+    {
+        ident(type.name());
+
+        if (type.generics_size() || type.genericpacks_size())
+        {
+            source += '<';
+            bool first = true;
+
+            for (size_t i = 0; i < type.generics_size(); ++i)
+            {
+                if (!first)
+                    source += ',';
+                first = false;
+                print(type.generics(i));
+            }
+
+            for (size_t i = 0; i < type.genericpacks_size(); ++i)
+            {
+                if (!first)
+                    source += ',';
+                first = false;
+                ident(type.genericpacks(i));
+                source += "...";
+            }
+
+            source += '>';
+        }
+    }
+
+    void print(const luau::TableFieldAccess& expr)
+    {
+        if (expr == luau::TableFieldAccess::Read)
+            source += "read";
+        else if (expr == luau::TableFieldAccess::Write)
+            source += "write";
+    }
+
+    void print(const luau::TypeTable& type)
+    {
+        source += '{';
+        for (size_t i = 0; i < type.items_size(); ++i)
+        {
+            auto& item = type.items(i);
+
+            if (item.has_access())
+            {
+                print(item.access());
+                source += ' ';
+            }
+
+            ident(item.key());
+            source += ':';
+            print(item.type());
+            source += ',';
+        }
+        if (type.has_indexer())
+        {
+            auto& indexer = type.indexer();
+
+            if (indexer.has_access())
+            {
+                print(indexer.access());
+                source += ' ';
+            }
+
+            source += '[';
+            print(indexer.key());
+            source += "]:";
+            print(indexer.value());
+        }
+        source += '}';
+    }
+
+    void print(const luau::TypeFunction& type)
+    {
+        genericidents(type);
+        source += '(';
+        for (size_t i = 0; i < type.args_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(type.args(i));
+        }
+        source += ")->";
+        if (type.rets_size() != 1)
+            source += '(';
+        for (size_t i = 0; i < type.rets_size(); ++i)
+        {
+            if (i != 0)
+                source += ',';
+            print(type.rets(i));
+        }
+        if (type.rets_size() != 1)
+            source += ')';
+    }
+
+    void print(const luau::TypeTypeof& type)
+    {
+        source += "typeof(";
+        print(type.expr());
+        source += ')';
+    }
+
+    void print(const luau::TypeUnion& type)
+    {
+        source += '(';
+        print(type.left());
+        source += ")|(";
+        print(type.right());
+        source += ')';
+    }
+
+    void print(const luau::TypeIntersection& type)
+    {
+        source += '(';
+        print(type.left());
+        source += ")&(";
+        print(type.right());
+        source += ')';
+    }
+
+    void print(const luau::TypeExtern& type)
+    {
+        size_t index = size_t(type.kind()) % std::size(kExternTypes);
+        source += kExternTypes[index];
+    }
+
+    void print(const luau::TypeRef& type)
+    {
+        print(type.prefix());
+        source += '.';
+        ident(type.index());
+    }
+
+    void print(const luau::TypeBoolean& type)
+    {
+        source += type.val() ? "true" : "false";
+    }
+
+    void print(const luau::TypeString& type)
+    {
+        source += '"';
+        for (char ch : type.val())
+            if (isgraph(ch))
+                source += ch;
+        source += '"';
+    }
+
+    void print(const luau::ExprLiteralTable& table)
+    {
+        source += '{';
+        for (int i = 0; i < table.items_size(); ++i)
+        {
+            ident(table.items(i).key_name());
+            source += '=';
+
+            print(table.items(i).value());
+            source += ',';
+        }
+        source += '}';
+    }
+
+    void print(const luau::ExprLiteral& lit)
+    {
+        if (lit.has_table())
+            print(lit.table());
+        else if (lit.has_nil())
+            print(lit.nil());
+        else if (lit.has_bool_())
+            print(lit.bool_());
+        else if (lit.has_number())
+            print(lit.number());
+        else if (lit.has_integer())
+            print(lit.integer());
+        else if (lit.has_string())
+            print(lit.string());
+    }
+
+    void print(const luau::ExprAttr& attr)
+    {
+        std::string name;
+        if (attr.type() == luau::AttrType::Checked)
+            name = "checked";
+        if (attr.type() == luau::AttrType::Native)
+            name = "native";
+        if (attr.type() == luau::AttrType::Deprecated)
+            name = "deprecated";
+        else
+            name = displayName(attr.name());
+
+        if (attr.braced())
+        {
+            source += "@[" + name;
+            if (attr.args_size() == 1)
+            {
+                source += " ";
+                print(attr.args(0));
+            }
+            else if (attr.args_size() > 1)
+            {
+                source += "(";
+                for (int i = 0; i < attr.args_size(); ++i)
+                {
+                    if (i != 0)
+                        source += ',';
+                    print(attr.args(i));
+                }
+                source += ")";
+            }
+            source += "]";
+        }
+        else
+        {
+            source += "@" + name;
+        }
+    }
+};
+
+std::vector<std::string> protoprint(const luau::ModuleSet& stat, bool types)
+{
+    std::vector<std::string> result;
+
+    if (stat.has_module())
+    {
+        ProtoToLuau printer;
+        printer.types = types;
+        printer.print(stat.module());
+        result.push_back(printer.source);
+    }
+
+    ProtoToLuau printer;
+    printer.types = types;
+    printer.print(stat.program());
+    result.push_back(printer.source);
+
+    return result;
+}

@@ -1,0 +1,352 @@
+# This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
+.SUFFIXES:
+MAKEFLAGS+=-r -j8
+COMMA=,
+
+CMAKE_PATH=cmake
+
+config=debug
+protobuf=system
+
+BUILD=build/$(config)
+
+COMMON_SOURCES=$(wildcard Common/src/*.cpp)
+COMMON_OBJECTS=$(COMMON_SOURCES:%=$(BUILD)/%.o)
+COMMON_TARGET=$(BUILD)/libluaucommon.a
+
+AST_SOURCES=$(wildcard Ast/src/*.cpp)
+AST_OBJECTS=$(AST_SOURCES:%=$(BUILD)/%.o)
+AST_TARGET=$(BUILD)/libluauast.a
+
+BYTECODE_SOURCES=$(wildcard Bytecode/src/*.cpp)
+BYTECODE_OBJECTS=$(BYTECODE_SOURCES:%=$(BUILD)/%.o)
+BYTECODE_TARGET=$(BUILD)/libluaubytecode.a
+
+JITINLINER_SOURCES=$(wildcard Inliner/src/*.cpp)
+JITINLINER_OBJECTS=$(JITINLINER_SOURCES:%=$(BUILD)/%.o)
+JITINLINER_TARGET=$(BUILD)/libluaujitinliner.a
+
+COMPILER_SOURCES=$(wildcard Compiler/src/*.cpp)
+COMPILER_OBJECTS=$(COMPILER_SOURCES:%=$(BUILD)/%.o)
+COMPILER_TARGET=$(BUILD)/libluaucompiler.a
+
+CONFIG_SOURCES=$(wildcard Config/src/*.cpp)
+CONFIG_OBJECTS=$(CONFIG_SOURCES:%=$(BUILD)/%.o)
+CONFIG_TARGET=$(BUILD)/libluauconfig.a
+
+ANALYSIS_SOURCES=$(wildcard Analysis/src/*.cpp)
+ANALYSIS_OBJECTS=$(ANALYSIS_SOURCES:%=$(BUILD)/%.o)
+ANALYSIS_TARGET=$(BUILD)/libluauanalysis.a
+
+CODEGEN_SOURCES=$(wildcard CodeGen/src/*.cpp)
+CODEGEN_OBJECTS=$(CODEGEN_SOURCES:%=$(BUILD)/%.o)
+CODEGEN_TARGET=$(BUILD)/libluaucodegen.a
+
+VM_SOURCES=$(wildcard VM/src/*.cpp)
+VM_OBJECTS=$(VM_SOURCES:%=$(BUILD)/%.o)
+VM_TARGET=$(BUILD)/libluauvm.a
+
+REQUIRE_SOURCES=$(wildcard Require/src/*.cpp)
+REQUIRE_OBJECTS=$(REQUIRE_SOURCES:%=$(BUILD)/%.o)
+REQUIRE_TARGET=$(BUILD)/libluaurequire.a
+
+ISOCLINE_SOURCES=extern/isocline/src/isocline.c
+ISOCLINE_OBJECTS=$(ISOCLINE_SOURCES:%=$(BUILD)/%.o)
+ISOCLINE_TARGET=$(BUILD)/libisocline.a
+
+TESTS_SOURCES=$(wildcard tests/*.cpp) CLI/src/FileUtils.cpp CLI/src/Flags.cpp CLI/src/Profiler.cpp CLI/src/Coverage.cpp CLI/src/Counters.cpp CLI/src/Repl.cpp CLI/src/ReplRequirer.cpp CLI/src/VfsNavigator.cpp
+TESTS_OBJECTS=$(TESTS_SOURCES:%=$(BUILD)/%.o)
+TESTS_TARGET=$(BUILD)/luau-tests
+
+TEST_LINK_VM_SOURCES=tests/link/Vm.test.cpp
+TEST_LINK_VM_OBJECTS=$(TEST_LINK_VM_SOURCES:%=$(BUILD)/%.o)
+TEST_LINK_VM_TARGET=$(BUILD)/luau-test-link-vm
+
+TEST_LINK_CODEGEN_SOURCES=tests/link/VmCodeGen.test.cpp
+TEST_LINK_CODEGEN_OBJECTS=$(TEST_LINK_CODEGEN_SOURCES:%=$(BUILD)/%.o)
+TEST_LINK_CODEGEN_TARGET=$(BUILD)/luau-test-link-codegen
+
+REPL_CLI_SOURCES=CLI/src/FileUtils.cpp CLI/src/Flags.cpp CLI/src/Profiler.cpp CLI/src/Coverage.cpp CLI/src/Counters.cpp CLI/src/Repl.cpp CLI/src/ReplEntry.cpp CLI/src/ReplRequirer.cpp CLI/src/VfsNavigator.cpp
+REPL_CLI_OBJECTS=$(REPL_CLI_SOURCES:%=$(BUILD)/%.o)
+REPL_CLI_TARGET=$(BUILD)/luau
+
+ANALYZE_CLI_SOURCES=CLI/src/FileUtils.cpp CLI/src/Flags.cpp CLI/src/Analyze.cpp CLI/src/AnalyzeRequirer.cpp CLI/src/VfsNavigator.cpp
+ANALYZE_CLI_OBJECTS=$(ANALYZE_CLI_SOURCES:%=$(BUILD)/%.o)
+ANALYZE_CLI_TARGET=$(BUILD)/luau-analyze
+
+COMPILE_CLI_SOURCES=CLI/src/FileUtils.cpp CLI/src/Flags.cpp CLI/src/Compile.cpp
+COMPILE_CLI_OBJECTS=$(COMPILE_CLI_SOURCES:%=$(BUILD)/%.o)
+COMPILE_CLI_TARGET=$(BUILD)/luau-compile
+
+BYTECODE_CLI_SOURCES=CLI/src/FileUtils.cpp CLI/src/Flags.cpp CLI/src/Bytecode.cpp
+BYTECODE_CLI_OBJECTS=$(BYTECODE_CLI_SOURCES:%=$(BUILD)/%.o)
+BYTECODE_CLI_TARGET=$(BUILD)/luau-bytecode
+
+MUTATOR_LIBS=build/libprotobuf-mutator/src/libfuzzer/libprotobuf-mutator-libfuzzer.a build/libprotobuf-mutator/src/libprotobuf-mutator.a
+
+FUZZ_SOURCES=$(wildcard fuzz/*.cpp) fuzz/luau.pb.cpp
+FUZZ_OBJECTS=$(FUZZ_SOURCES:%=$(BUILD)/%.o)
+
+TESTS_ARGS=
+ifneq ($(flags),)
+	TESTS_ARGS+=--fflags=$(flags)
+endif
+ifneq ($(opt),)
+	TESTS_ARGS+=-O$(opt)
+endif
+
+OBJECTS=$(COMMON_OBJECTS) $(AST_OBJECTS) $(COMPILER_OBJECTS) $(BYTECODE_OBJECTS) $(JITINLINER_OBJECTS) $(CONFIG_OBJECTS) $(ANALYSIS_OBJECTS) $(CODEGEN_OBJECTS) $(VM_OBJECTS) $(REQUIRE_OBJECTS) $(ISOCLINE_OBJECTS) $(TESTS_OBJECTS) $(REPL_CLI_OBJECTS) $(ANALYZE_CLI_OBJECTS) $(COMPILE_CLI_OBJECTS) $(BYTECODE_CLI_OBJECTS) $(TEST_LINK_VM_OBJECTS) $(TEST_LINK_CODEGEN_OBJECTS) $(FUZZ_OBJECTS)
+EXECUTABLE_ALIASES = luau luau-analyze luau-compile luau-bytecode luau-tests
+
+# `LUAU_CONFORMANCE_SOURCE_DIR` is configured at build time
+LUAU_CONFORMANCE_SOURCE_DIR = "\"$(realpath .)/tests/conformance\""
+
+# common flags
+CXXFLAGS=-g -Wall
+LDFLAGS=
+
+# some gcc versions treat var in `if (type var = val)` as unused
+# some gcc versions treat variables used in constexpr if blocks as unused
+# some gcc versions warn maybe uninitialized on optional<std::string> members on structs
+ifeq ($(findstring g++,$(shell $(CXX) --version)),g++)
+	CXXFLAGS+=-Wno-unused
+	CXXFLAGS+=-Wno-maybe-uninitialized
+endif
+
+# enabled in CI; we should be warning free on our main compiler versions but don't guarantee being warning free everywhere
+ifneq ($(werror),)
+	CXXFLAGS+=-Werror
+	CXXFLAGS+=-Wno-unused-but-set-variable
+endif
+
+# configuration-specific flags
+ifeq ($(config),release)
+	CXXFLAGS+=-O2 -DNDEBUG -fno-math-errno
+endif
+
+ifeq ($(config),coverage)
+	CXXFLAGS+=-fprofile-instr-generate -fcoverage-mapping
+	LDFLAGS+=-fprofile-instr-generate
+endif
+
+ifeq ($(config),sanitize)
+	CXXFLAGS+=-fsanitize=address -O1
+	LDFLAGS+=-fsanitize=address
+endif
+
+ifeq ($(config),analyze)
+	CXXFLAGS+=--analyze
+endif
+
+ifeq ($(config),fuzz)
+	CXXFLAGS+=-fsanitize=address,fuzzer -Ibuild/libprotobuf-mutator -O2
+	LDFLAGS+=-fsanitize=address,fuzzer
+	LPROTOBUF=-lprotobuf
+	DPROTOBUF=-D CMAKE_BUILD_TYPE=Release -D LIB_PROTO_MUTATOR_TESTING=OFF
+	EPROTOC=protoc
+endif
+
+ifeq ($(config),profile)
+	CXXFLAGS+=-O2 -DNDEBUG -fno-math-errno -gdwarf-4 -DCALLGRIND=1
+endif
+
+ifeq ($(protobuf),download)
+	CXXFLAGS+=-Ibuild/libprotobuf-mutator/external.protobuf/include
+	LPROTOBUF=build/libprotobuf-mutator/external.protobuf/lib/libprotobuf.a
+	DPROTOBUF+=-D LIB_PROTO_MUTATOR_DOWNLOAD_PROTOBUF=ON
+	EPROTOC=../build/libprotobuf-mutator/external.protobuf/bin/protoc
+endif
+
+ifneq ($(native),)
+	TESTS_ARGS+=--codegen
+endif
+
+ifneq ($(nativelj),)
+	CXXFLAGS+=-DLUA_USE_LONGJMP=1
+	TESTS_ARGS+=--codegen
+endif
+
+# target-specific flags
+$(COMMON_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include
+$(AST_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IAst/include
+$(BYTECODE_OBJECTS): CXXFLAGS+=-std=c++17 -IBytecode/include -ICommon/include
+$(JITINLINER_OBJECTS): CXXFLAGS+=-std=c++17 -IInliner/include -IBytecode/include -IBytecode/src -ICommon/include -IVM/include -IVM/src
+$(COMPILER_OBJECTS): CXXFLAGS+=-std=c++17 -IBytecode/include -ICompiler/include -ICommon/include -IAst/include
+$(CONFIG_OBJECTS): CXXFLAGS+=-std=c++17 -IConfig/include -ICommon/include -IAst/include -IBytecode/include -ICompiler/include -IVM/include
+$(ANALYSIS_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IAst/include -IAnalysis/include -IConfig/include -IBytecode/include -ICompiler/include -IVM/include
+$(CODEGEN_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -ICodeGen/include -IVM/include -IVM/src # Code generation needs VM internals
+$(VM_OBJECTS): CXXFLAGS+=-std=c++11 -ICommon/include -IVM/include
+$(REQUIRE_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IVM/include -IAst/include -IConfig/include -IRequire/include
+$(ISOCLINE_OBJECTS): CXXFLAGS+=-Wno-unused-function -Iextern/isocline/include
+$(TESTS_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IAst/include -IBytecode/include -IInliner/include -ICompiler/include -IConfig/include -IAnalysis/include -ICodeGen/include -IVM/include -IVM/src -IRequire/include -ICLI/include -Iextern -DDOCTEST_CONFIG_DOUBLE_STRINGIFY -DDOCTEST_CONFIG_USE_STD_HEADERS -DLUAU_CONFORMANCE_SOURCE_DIR=$(LUAU_CONFORMANCE_SOURCE_DIR)
+$(REPL_CLI_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IAst/include -IBytecode/include -IInliner/include -ICompiler/include -IVM/include -ICodeGen/include -IRequire/include -Iextern -Iextern/isocline/include -ICLI/include
+$(ANALYZE_CLI_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IAst/include -IAnalysis/include -IConfig/include -IRequire/include -IVM/include -Iextern -ICLI/include
+$(COMPILE_CLI_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IAst/include -IBytecode/include -ICompiler/include -IVM/include -ICodeGen/include -ICLI/include
+$(BYTECODE_CLI_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IAst/include -IBytecode/include -ICompiler/include -IVM/include -ICodeGen/include -ICLI/include
+$(TEST_LINK_VM_OBJECTS): CXXFLAGS+=-std=c++11 -ICommon/include -IVM/include
+$(TEST_LINK_CODEGEN_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IVM/include -ICodeGen/include
+$(FUZZ_OBJECTS): CXXFLAGS+=-std=c++17 -ICommon/include -IAst/include -IBytecode/include -IInliner/include -ICompiler/include -IAnalysis/include -IVM/include -ICodeGen/include -IConfig/include
+
+$(TESTS_TARGET): LDFLAGS+=-lpthread
+$(REPL_CLI_TARGET): LDFLAGS+=-lpthread
+$(ANALYZE_CLI_TARGET): LDFLAGS+=-lpthread
+fuzz-proto fuzz-prototest: LDFLAGS+=$(LPROTOBUF)
+
+# pseudo targets
+.PHONY: all test clean coverage format luau-size aliases build-mutator-libs
+
+# Explicitly make 'all' the default goal ensuring that even if targets are added before 'all', they won't
+# implicitly become the default target built by make.
+.DEFAULT_GOAL:=all
+
+all: $(REPL_CLI_TARGET) $(ANALYZE_CLI_TARGET) $(TESTS_TARGET) aliases
+
+aliases: $(EXECUTABLE_ALIASES)
+
+test: $(TESTS_TARGET) $(TEST_LINK_VM_TARGET) $(TEST_LINK_CODEGEN_TARGET)
+	$(TESTS_TARGET) $(TESTS_ARGS)
+
+conformance: $(TESTS_TARGET)
+	$(TESTS_TARGET) $(TESTS_ARGS) -ts=Conformance
+
+clean:
+	rm -rf $(BUILD)
+	rm -rf build/fuzz fuzz-proto fuzz-prototest
+	rm -rf $(EXECUTABLE_ALIASES)
+
+coverage: $(TESTS_TARGET) $(COMPILE_CLI_TARGET)
+	$(TESTS_TARGET)
+	mv default.profraw tests.profraw
+	$(TESTS_TARGET) --fflags=true
+	mv default.profraw tests-flags.profraw
+	$(TESTS_TARGET) --fflags=true,DebugLuauForceOldSolver=true
+	mv default.profraw tests-dcr.profraw
+	$(TESTS_TARGET) -ts=Conformance --codegen
+	mv default.profraw codegen.profraw
+	$(TESTS_TARGET) -ts=Conformance --codegen --fflags=true
+	mv default.profraw codegen-flags.profraw
+	$(COMPILE_CLI_TARGET) --codegennull --target=a64 --fflags=DebugLuauUserDefinedClasses=true tests/conformance
+	mv default.profraw codegen-a64.profraw
+	$(COMPILE_CLI_TARGET) --codegennull --target=x64 --fflags=DebugLuauUserDefinedClasses=true tests/conformance
+	mv default.profraw codegen-x64.profraw
+	llvm-profdata merge *.profraw -o default.profdata
+	rm *.profraw
+	llvm-cov show -format=html -show-instantiations=false -show-line-counts=true -show-region-summary=false -ignore-filename-regex=\(tests\|extern\|CLI\)/.* -output-dir=coverage --instr-profile default.profdata -object build/coverage/luau-tests -object build/coverage/luau-compile
+	llvm-cov report -ignore-filename-regex=\(tests\|extern\|CLI\)/.* -show-region-summary=false --instr-profile default.profdata -object build/coverage/luau-tests -object build/coverage/luau-compile
+	llvm-cov export -ignore-filename-regex=\(tests\|extern\|CLI\)/.* -format lcov --instr-profile default.profdata -object build/coverage/luau-tests -object build/coverage/luau-compile >coverage.info
+
+format:
+	git ls-files '*.h' '*.cpp' | xargs clang-format-11 -i
+
+FUZZ_OBJECTS: $(MUTATOR_LIBS)
+
+luau-size: luau
+	nm --print-size --demangle luau | grep ' t void luau_execute<false>' | awk -F ' ' '{sum += strtonum("0x" $$2)} END {print sum " interpreter" }'
+	nm --print-size --demangle luau | grep ' t luauF_' | awk -F ' ' '{sum += strtonum("0x" $$2)} END {print sum " builtins" }'
+
+check-source:
+	git ls-files '*.h' '*.cpp' | xargs -I+ sh -c 'grep -L LICENSE +'
+	git ls-files '*.h' ':!:extern' | xargs -I+ sh -c 'grep -L "#pragma once" +'
+
+# executable target aliases
+luau: $(REPL_CLI_TARGET)
+	ln -fs $^ $@
+
+luau-analyze: $(ANALYZE_CLI_TARGET)
+	ln -fs $^ $@
+
+luau-compile: $(COMPILE_CLI_TARGET)
+	ln -fs $^ $@
+
+luau-bytecode: $(BYTECODE_CLI_TARGET)
+	ln -fs $^ $@
+
+luau-tests: $(TESTS_TARGET) $(TEST_LINK_VM_TARGET) $(TEST_LINK_CODEGEN_TARGET)
+	ln -fs $(TESTS_TARGET) $@
+
+# executable targets
+$(TESTS_TARGET): $(TESTS_OBJECTS) $(ANALYSIS_TARGET) $(COMPILER_TARGET) $(JITINLINER_TARGET) $(BYTECODE_TARGET) $(AST_TARGET) $(CODEGEN_TARGET) $(VM_TARGET) $(REQUIRE_TARGET) $(CONFIG_TARGET) $(ISOCLINE_TARGET) $(COMMON_TARGET)
+$(REPL_CLI_TARGET): $(REPL_CLI_OBJECTS) $(COMPILER_TARGET) $(JITINLINER_TARGET) $(BYTECODE_TARGET) $(AST_TARGET) $(CODEGEN_TARGET) $(VM_TARGET) $(REQUIRE_TARGET) $(CONFIG_TARGET) $(ISOCLINE_TARGET) $(COMMON_TARGET)
+$(ANALYZE_CLI_TARGET): $(ANALYZE_CLI_OBJECTS) $(ANALYSIS_TARGET) $(AST_TARGET) $(COMPILER_TARGET) $(BYTECODE_TARGET) $(VM_TARGET) $(REQUIRE_TARGET) $(CONFIG_TARGET) $(COMMON_TARGET)
+$(COMPILE_CLI_TARGET): $(COMPILE_CLI_OBJECTS) $(COMPILER_TARGET) $(BYTECODE_TARGET) $(AST_TARGET) $(CODEGEN_TARGET) $(VM_TARGET) $(COMMON_TARGET)
+$(BYTECODE_CLI_TARGET): $(BYTECODE_CLI_OBJECTS) $(COMPILER_TARGET) $(BYTECODE_TARGET) $(AST_TARGET) $(CODEGEN_TARGET) $(VM_TARGET) $(COMMON_TARGET)
+
+$(TESTS_TARGET) $(REPL_CLI_TARGET) $(ANALYZE_CLI_TARGET) $(COMPILE_CLI_TARGET) $(BYTECODE_CLI_TARGET):
+	$(CXX) $^ $(LDFLAGS) -o $@
+
+WHOLE_ARCHIVE_START=$(if $(filter Darwin,$(shell uname -s)),,-Wl,--whole-archive)
+WHOLE_ARCHIVE_END=$(if $(filter Darwin,$(shell uname -s)),,-Wl,--no-whole-archive)
+
+$(TEST_LINK_VM_TARGET): $(TEST_LINK_VM_OBJECTS) $(VM_TARGET) $(COMMON_TARGET)
+	$(CXX) $< $(LDFLAGS) $(WHOLE_ARCHIVE_START) $(VM_TARGET) $(COMMON_TARGET) $(WHOLE_ARCHIVE_END) -o $@
+
+$(TEST_LINK_CODEGEN_TARGET): $(TEST_LINK_CODEGEN_OBJECTS) $(CODEGEN_TARGET) $(VM_TARGET) $(COMMON_TARGET)
+	$(CXX) $< $(LDFLAGS) $(WHOLE_ARCHIVE_START) $(CODEGEN_TARGET) $(VM_TARGET) $(COMMON_TARGET) $(WHOLE_ARCHIVE_END) -o $@
+
+# executable targets for fuzzing
+fuzz-%: $(BUILD)/fuzz/%.cpp.o $(ANALYSIS_TARGET) $(COMPILER_TARGET) $(JITINLINER_TARGET) $(BYTECODE_TARGET) $(AST_TARGET) $(CONFIG_TARGET) $(CODEGEN_TARGET) $(VM_TARGET) $(COMMON_TARGET)
+	$(CXX) $^ $(LDFLAGS) -o $@
+
+# add libprotobuf-mutator on top of common targets above
+fuzz-proto: $(BUILD)/fuzz/proto.cpp.o $(BUILD)/fuzz/protoprint.cpp.o $(BUILD)/fuzz/luau.pb.cpp.o $(MUTATOR_LIBS) | build/libprotobuf-mutator
+fuzz-prototest: $(BUILD)/fuzz/prototest.cpp.o $(BUILD)/fuzz/protoprint.cpp.o $(BUILD)/fuzz/luau.pb.cpp.o $(MUTATOR_LIBS) | build/libprotobuf-mutator
+
+# static library targets
+$(COMMON_TARGET): $(COMMON_OBJECTS)
+$(AST_TARGET): $(AST_OBJECTS)
+$(BYTECODE_TARGET): $(BYTECODE_OBJECTS)
+$(JITINLINER_TARGET): $(JITINLINER_OBJECTS)
+$(COMPILER_TARGET): $(COMPILER_OBJECTS)
+$(CONFIG_TARGET): $(CONFIG_OBJECTS)
+$(ANALYSIS_TARGET): $(ANALYSIS_OBJECTS)
+$(CODEGEN_TARGET): $(CODEGEN_OBJECTS)
+$(VM_TARGET): $(VM_OBJECTS)
+$(REQUIRE_TARGET): $(REQUIRE_OBJECTS)
+$(ISOCLINE_TARGET): $(ISOCLINE_OBJECTS)
+
+$(COMMON_TARGET) $(AST_TARGET) $(BYTECODE_TARGET) $(JITINLINER_TARGET) $(COMPILER_TARGET) $(CONFIG_TARGET) $(ANALYSIS_TARGET) $(CODEGEN_TARGET) $(VM_TARGET) $(REQUIRE_TARGET) $(ISOCLINE_TARGET):
+	ar rcs $@ $^
+
+# object file targets
+$(BUILD)/%.cpp.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $< $(CXXFLAGS) -c -MMD -MP -o $@
+
+$(BUILD)/%.c.o: %.c
+	@mkdir -p $(dir $@)
+	$(CXX) -x c $< $(CXXFLAGS) -c -MMD -MP -o $@
+
+# protobuf fuzzer setup
+fuzz/luau.pb.cpp: fuzz/luau.proto $(MUTATOR_LIBS)
+	cd fuzz && $(EPROTOC) luau.proto --cpp_out=.
+	mv fuzz/luau.pb.cc fuzz/luau.pb.cpp
+
+$(BUILD)/fuzz/proto.cpp.o: fuzz/luau.pb.cpp
+$(BUILD)/fuzz/protoprint.cpp.o: fuzz/luau.pb.cpp
+$(BUILD)/fuzz/prototest.cpp.o: fuzz/luau.pb.cpp
+
+# Clone and checkout the expected version of libprotobuf-mutator
+build/libprotobuf-mutator:
+	git clone https://github.com/google/libprotobuf-mutator build/libprotobuf-mutator
+	git -C build/libprotobuf-mutator checkout 212a7be1eb08e7f9c79732d2aab9b2097085d936
+
+# cmake complains if we pass empty variables and may determine that variables
+# don't match values previously used (even if they were also empty). This causes
+# cmake to re-configure and rebuild unnecessarily. To avoid this issue we only
+# pass variables to cmake that have values.
+CMAKE_OPTIONS=$(if $(CMAKE_CXX),-DCMAKE_CXX_COMPILER=$(CMAKE_CXX))
+CMAKE_OPTIONS+=$(if $(CMAKE_CC),-DCMAKE_C_COMPILER=$(CMAKE_CC))
+CMAKE_OPTIONS+=$(if $(CMAKE_PROXY),-DCMAKE_CXX_COMPILER_LAUNCHER=$(CMAKE_PROXY))
+
+build/libprotobuf-mutator/Makefile: build/libprotobuf-mutator
+	$(CMAKE_PATH) $(CMAKE_OPTIONS) -S build/libprotobuf-mutator -B build/libprotobuf-mutator $(DPROTOBUF)
+
+build-mutator-libs: build/libprotobuf-mutator/Makefile
+	$(MAKE) -C build/libprotobuf-mutator
+
+# MUTATOR_LIBS depends on a phony target because if we directly called make within this
+# target it could be invoked multiple times (once per library) and break the build.
+$(MUTATOR_LIBS): build-mutator-libs
+
+# picks up include dependencies for all object files
+-include $(OBJECTS:.o=.d)
