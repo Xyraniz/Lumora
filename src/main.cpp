@@ -64,14 +64,14 @@ local function removeChild(parent, child)
 end
 instance_mt.__index = function(self, key)
     if key == "Parent" then return rawget(self, "_parent") end
-    if key == "GetChildren" then return function(obj) return obj._children end end
+    if key == "GetChildren" then return function(obj) if obj == nil then error("Expected ':' not '.' calling member function GetChildren", 0) end return obj._children end end
     if key == "FindFirstChild" then return function(obj, name) for _, c in ipairs(obj._children) do if c.Name == name then return c end end return nil end end
     if key == "WaitForChild" then return function(obj, name) return obj:FindFirstChild(name) or error("Infinite yield possible on '" .. obj:GetFullName() .. ":WaitForChild(" .. name .. ")'") end end
     if key == "GetService" then return function(obj, name) return obj._services[name] or Instance.new(name, obj) end end
     if key == "GetFullName" then return function(obj) local p=obj.Name; local q=obj.Parent; while q do p=q.Name.."."..p; q=q.Parent end return p end end
     if key == "Destroy" then return function(obj)
         if obj.Parent then obj.Parent = nil end
-        for _, child in ipairs(obj._children) do child.Parent = nil end
+        while #obj._children > 0 do obj._children[1]:Destroy() end
         obj._destroyed = true
     end end
     if key == "IsA" then return function(obj, n) return obj.ClassName == n or n == "Instance" end end
@@ -97,7 +97,7 @@ end
 
 Instance = {}
 function Instance.new(className, parent)
-    local o = setmetatable({ ClassName=className, Name=className, _children={}, _attributes={}, AttributeChanged=signal(), ChildAdded=signal(), ChildRemoved=signal() }, instance_mt)
+    local o = setmetatable({ ClassName=className, Name=className, __type="Instance", _children={}, _attributes={}, AttributeChanged=signal(), ChildAdded=signal(), ChildRemoved=signal() }, instance_mt)
     if parent then o.Parent = parent end
     return o
 end
@@ -115,14 +115,23 @@ local function enumValue(name)
     for i = 1, #name do value = (value * 33 + string.byte(name, i)) % 2147483647 end
     return value
 end
-Enum = setmetatable({}, { __index = function(_, enumName)
-    local t = { Name=enumName, __type="EnumType", _items={} }
+Enum = setmetatable({ __type="Enums" }, { __metatable="The metatable is locked", __index = function(_, enumName)
+    local t = { Name=enumName, __type="Enum", _items={} }
     rawset(_, enumName, t)
-    function t:FromName(name) return self[name] end
+        function t:FromName(name) return self[name] end
     function t:FromValue(value) for _, item in ipairs(self._items) do if item.Value==value then return item end end return nil end
     setmetatable(t, { __metatable="The metatable is locked", __index = function(e, item) local v=setmetatable({ Name=item, EnumType=e, Value=#e._items, __type="EnumItem" }, { __tostring=function() return "Enum."..enumName.."."..item end }); rawset(e, item, v); table.insert(e._items, v); return v end, __tostring=function() return "Enum."..enumName end })
     return t
 end })
+
+local builtin_type = type
+type = function(value)
+    if builtin_type(value) == "table" then
+        local marker = rawget(value, "__type")
+        if marker == "Instance" or marker == "Enums" or marker == "Enum" or marker == "EnumItem" then return "userdata" end
+    end
+    return builtin_type(value)
+end
 
 local function vec2(x,y)
     return setmetatable({X=x or 0,Y=y or 0,__type="Vector2"}, {__index={Magnitude=math.sqrt((x or 0)^2+(y or 0)^2)}, __tostring=function(v) return string.format("%g, %g",v.X,v.Y) end})
@@ -137,14 +146,19 @@ Path2D = { new=function() return {ControlPoints={},__type="Path2D"} end }
 
 Random = {}
 local function mul32(a, b)
+    -- Split into 16-bit limbs so every intermediate remains exactly
+    -- representable as a Luau double. This is the low-level operation used
+    -- by the 64-bit PCG state below.
     local a0 = bit32.band(a, 65535)
     local a1 = math.floor(a / 65536)
     local b0 = bit32.band(b, 65535)
     local b1 = math.floor(b / 65536)
     local p0 = a0 * b0
     local p1 = a0 * b1 + a1 * b0
-    local lo = (p0 + bit32.band(p1, 65535) * 65536) % 4294967296
-    local hi = (math.floor(p0 / 4294967296) + math.floor(p1 / 65536) + a1 * b1) % 4294967296
+    local p2 = a1 * b1
+    local t = math.floor(p0 / 65536) + bit32.band(p1, 65535)
+    local lo = (bit32.band(p0, 65535) + bit32.band(t, 65535) * 65536) % 4294967296
+    local hi = (math.floor(t / 65536) + math.floor(p1 / 65536) + p2) % 4294967296
     return lo, hi
 end
 local function pcgNext(s)
@@ -191,13 +205,25 @@ end
 
 local tasklib = {}
 function tasklib.spawn(fn, ...) local co=coroutine.create(fn); local ok,err=coroutine.resume(co,...); if not ok then error(err,0) end; return co end
-function tasklib.delay(_, fn, ...) return tasklib.spawn(fn, ...) end
-function tasklib.cancel(_) end
+function tasklib.delay(_, fn, ...)
+    local co = coroutine.create(fn)
+    local args = table.pack(...)
+    tasklib._delayed = tasklib._delayed or {}
+    tasklib._delayed[co] = args
+    return co
+end
+function tasklib.cancel(co)
+    if type(co) == "thread" then
+        tasklib._delayed = tasklib._delayed or {}
+        tasklib._delayed[co] = nil
+        pcall(coroutine.close, co)
+    end
+end
 function tasklib.wait(seconds) return seconds or 0 end
 function tasklib.defer(fn, ...) return tasklib.spawn(fn, ...) end
  task = tasklib
 
-typeof = function(v) if type(v)=="table" and v.ClassName then return "Instance" elseif type(v)=="table" and v.__type then return v.__type elseif type(v)=="table" and v.X and v.Y then return "Vector2" else return type(v) end end
+typeof = function(v) if builtin_type(v)=="table" and rawget(v, "ClassName") then return "Instance" elseif builtin_type(v)=="table" and rawget(v, "__type") then return rawget(v, "__type") elseif builtin_type(v)=="table" and rawget(v, "X") and rawget(v, "Y") then return "Vector2" else return builtin_type(v) end end
 iscclosure = function(f) return type(f)=="function" end
 islclosure = iscclosure
 newcclosure = function(f) assert(type(f)=="function", "function expected"); return f end

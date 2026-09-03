@@ -13,7 +13,7 @@ make
 make test
 ```
 
-El ejecutable principal queda en `bin/lumora`. También se genera `bin/luau-vm` como alias de compatibilidad para scripts existentes. El lanzador `bin/run` delega al ejecutable principal, por lo que ambos estilos son válidos:
+El ejecutable principal y nombre recomendado son `bin/lumora`. También se genera `bin/luau-vm` únicamente como alias de compatibilidad para scripts existentes que aún usan ese nombre; los nuevos comandos y pipelines deben invocar `lumora`. El lanzador `bin/run` delega al ejecutable principal, por lo que ambos estilos son válidos:
 
 ```bash
 ./bin/lumora script.lua argumento1 argumento2
@@ -55,7 +55,7 @@ make test
 ctest --test-dir build --output-on-failure
 ```
 
-Las suites cubren argumentos y stdout, `--json`, timeout, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta/baja de hijos, atributos, enumeraciones, tipos, scheduling y Random.
+Las suites cubren argumentos y stdout, `--json`, timeout, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta/baja de hijos, atributos, enumeraciones, tipos compatibles con las comprobaciones de Fengetheus, destrucción recursiva, llamadas con `:` y scheduling/cancelación básica.
 
 Para inspeccionar la salida estructurada:
 

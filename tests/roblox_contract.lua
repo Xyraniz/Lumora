@@ -1,0 +1,30 @@
+assert(type(game) == "userdata")
+assert(typeof(game) == "Instance")
+assert(type(Enum) == "userdata")
+assert(typeof(Enum) == "Enums")
+assert(getmetatable(Enum) == "The metatable is locked")
+assert(typeof(Enum.Test.R6) == "EnumItem")
+assert(getmetatable(Enum.Test) == "The metatable is locked")
+
+local rng = Random.new(177465824)
+assert(rng:NextNumber() == 0.9598971928030796)
+assert(rng:NextInteger(189, 1164) == 889)
+assert(rng:NextNumber() == 0.027539190730015265)
+
+local parent = Instance.new("Folder")
+local first = Instance.new("Folder", parent)
+local second = Instance.new("Folder", parent)
+local nested = Instance.new("Folder", first)
+assert(#parent:GetChildren() == 2)
+parent:Destroy()
+assert(#parent:GetChildren() == 0)
+assert(first.Parent == nil and second.Parent == nil and nested.Parent == nil)
+
+local ok, err = pcall(parent.GetChildren, nil)
+assert(not ok and string.find(err, "Expected ':' not '.' calling member function GetChildren", 1, true))
+
+local called = false
+local handle = task.delay(86400, function() called = true end)
+task.cancel(handle)
+assert(not called)
+print("roblox-contract-ok")
