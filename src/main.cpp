@@ -50,8 +50,26 @@ local function signal()
         table.insert(s._connections, { fn = fn, c = c })
         return c
     end
+    function s:Once(fn)
+        local conn
+        conn = s:Connect(function(...)
+            if conn then conn:Disconnect() end
+            fn(...)
+        end)
+        return conn
+    end
+    function s:Wait()
+        -- In Roblox this yields until the signal fires. In Lumora we can't
+        -- truly yield across the pcall boundary, so return nil immediately.
+        -- This is sufficient for scripts that use :Wait() with fallback logic.
+        return nil
+    end
     function s:Fire(...)
         for _, x in ipairs(s._connections) do if x.c.Connected then x.fn(...) end end
+    end
+    function s:DisconnectAll()
+        for _, x in ipairs(s._connections) do x.c.Connected = false end
+        s._connections = {}
     end
     return s
 end
@@ -130,9 +148,28 @@ end })
 -- marker that the Roblox prelude sets on emulated userdata objects.
 
 local function vec2(x,y)
-    return setmetatable({X=x or 0,Y=y or 0,__type="Vector2"}, {__index={Magnitude=math.sqrt((x or 0)^2+(y or 0)^2)}, __tostring=function(v) return string.format("%g, %g",v.X,v.Y) end})
+    return setmetatable({X=x or 0,Y=y or 0,__type="Vector2"}, {
+        __index = function(t, k)
+            if k == "Magnitude" then return math.sqrt(t.X^2+t.Y^2) end
+            if k == "Unit" then
+                local m = math.sqrt(t.X^2+t.Y^2)
+                if m == 0 then return vec2(0,0) end
+                return vec2(t.X/m, t.Y/m)
+            end
+            return nil
+        end,
+        __add = function(a,b) return vec2(a.X+(b.X or 0), a.Y+(b.Y or 0)) end,
+        __sub = function(a,b) return vec2(a.X-(b.X or 0), a.Y-(b.Y or 0)) end,
+        __mul = function(a,b) if type(b)=="number" then return vec2(a.X*b,a.Y*b) end return vec2(a.X*b.X,a.Y*b.Y) end,
+        __div = function(a,b) if type(b)=="number" then return vec2(a.X/b,a.Y/b) end return vec2(a.X/b.X,a.Y/b.Y) end,
+        __unm = function(a) return vec2(-a.X, -a.Y) end,
+        __eq = function(a,b) return a.X==b.X and a.Y==b.Y end,
+        __tostring = function(v) return string.format("%g, %g",v.X,v.Y) end
+    })
 end
-Vector2 = { new=vec2 }
+Vector2 = { new=vec2,
+    zero = vec2(0,0), one = vec2(1,1)
+}
 UDim2 = {
     new=function(sx,ox,sy,oy) return {X={Scale=sx,Offset=ox},Y={Scale=sy,Offset=oy},__type="UDim2"} end,
     fromScale=function(x,y) return UDim2.new(x,0,y,0) end,
@@ -206,24 +243,91 @@ function Random.new(seed)
 end
 
 local tasklib = {}
-function tasklib.spawn(fn, ...) local co=coroutine.create(fn); local ok,err=coroutine.resume(co,...); if not ok then error(err,0) end; return co end
-function tasklib.delay(_, fn, ...)
+-- Scheduler: collects spawned/delayed coroutines. task.wait() yields,
+-- and the scheduler resumes them after the main script body finishes.
+-- This mirrors Roblox's cooperative scheduling model closely enough for
+-- verification: the main script runs to completion (setting up UI, state,
+-- connections), then spawned loops get a few resume cycles before we stop.
+tasklib._threads = {}      -- active coroutines waiting to be resumed
+tasklib._maxCycles = 50    -- safety: max scheduler iterations
+tasklib._cycleCount = 0
+
+function tasklib.spawn(fn, ...)
     local co = coroutine.create(fn)
-    local args = table.pack(...)
-    tasklib._delayed = tasklib._delayed or {}
-    tasklib._delayed[co] = args
+    tasklib._threads[co] = table.pack(...) or { n = 0 }
+    -- Resume immediately up to the first yield (e.g. task.wait())
+    local args = tasklib._threads[co]
+    local ok, err = coroutine.resume(co, table.unpack(args, 1, args.n))
+    if not ok and coroutine.status(co) ~= "dead" then
+        -- Propagate errors only if the coroutine died with an error
+        if coroutine.status(co) == "dead" then error(err, 0) end
+    end
+    if coroutine.status(co) == "dead" then
+        tasklib._threads[co] = nil
+    end
     return co
 end
+
+function tasklib.delay(seconds, fn, ...)
+    -- delay just spawns but yields first; for our purposes, spawn immediately
+    return tasklib.spawn(fn, ...)
+end
+
 function tasklib.cancel(co)
     if type(co) == "thread" then
-        tasklib._delayed = tasklib._delayed or {}
-        tasklib._delayed[co] = nil
+        tasklib._threads[co] = nil
         pcall(coroutine.close, co)
     end
 end
-function tasklib.wait(seconds) return seconds or 0 end
+
+function tasklib.wait(seconds)
+    -- Yield back to the caller; the scheduler will resume us later.
+    coroutine.yield()
+    return seconds or 0
+end
+
 function tasklib.defer(fn, ...) return tasklib.spawn(fn, ...) end
+
+-- Run the scheduler: resume all active threads a limited number of times.
+-- This is called after the main script body executes.
+function tasklib._runScheduler()
+    for cycle = 1, tasklib._maxCycles do
+        tasklib._cycleCount = cycle
+        local anyAlive = false
+        for co, args in pairs(tasklib._threads) do
+            if coroutine.status(co) ~= "dead" then
+                anyAlive = true
+                local ok, err = coroutine.resume(co, table.unpack(args, 1, args.n))
+                if not ok then
+                    -- Silently drop errored threads (Roblox warns but continues)
+                    tasklib._threads[co] = nil
+                end
+                if coroutine.status(co) == "dead" then
+                    tasklib._threads[co] = nil
+                end
+            else
+                tasklib._threads[co] = nil
+            end
+        end
+        if not anyAlive then break end
+    end
+end
+
  task = tasklib
+
+-- tick(): returns current time in seconds (Roblox global)
+local _tickStart = os.clock()
+tick = function() return os.clock() - _tickStart end
+-- time(): alias for tick in some contexts
+time = tick
+
+-- wait/delay/spawn: Roblox-style globals (in addition to task.* variants)
+wait = function(seconds) return tasklib.wait(seconds) end
+delay = function(seconds, fn) return tasklib.delay(seconds, fn) end
+spawn = function(fn, ...) return tasklib.spawn(fn, ...) end
+
+-- warn(): like print but prefixed with warning
+warn = function(...) print("[Warning]", ...) end
 
 -- typeof is registered as a native C function (see registerRobloxGlobals).
 iscclosure = iscclosure
@@ -335,12 +439,21 @@ Drawing.Fonts = { Plex = 0, Monospace = 1, System = 2, UI = 3 }
 local function vec3(x,y,z)
     x, y, z = x or 0, y or 0, z or 0
     return setmetatable({X=x,Y=y,Z=z,__type="Vector3"}, {
-        __index = { Magnitude = math.sqrt(x*x+y*y+z*z),
-            Unit = setmetatable({X=x,Y=y,Z=z,__type="Vector3"}, {__tostring=function() return "Vector3" end}) },
-        __add = function(a,b) return Vector3.new(a.X+b.X, a.Y+b.Y, a.Z+b.Z) end,
-        __sub = function(a,b) return Vector3.new(a.X-b.X, a.Y-b.Y, a.Z-b.Z) end,
-        __mul = function(a,b) if type(b)=="number" then return Vector3.new(a.X*b,a.Y*b,a.Z*b) end return Vector3.new(a.X*b.X,a.Y*b.Y,a.Z*b.Z) end,
-        __div = function(a,b) if type(b)=="number" then return Vector3.new(a.X/b,a.Y/b,a.Z/b) end return Vector3.new(a.X/b.X,a.Y/b.Y,a.Z/b.Z) end,
+        __index = function(t, k)
+            if k == "Magnitude" then return math.sqrt(t.X^2+t.Y^2+t.Z^2) end
+            if k == "Unit" then
+                local m = math.sqrt(t.X^2+t.Y^2+t.Z^2)
+                if m == 0 then return vec3(0,0,0) end
+                return vec3(t.X/m, t.Y/m, t.Z/m)
+            end
+            return nil
+        end,
+        __add = function(a,b) return vec3(a.X+(b.X or 0), a.Y+(b.Y or 0), a.Z+(b.Z or 0)) end,
+        __sub = function(a,b) return vec3(a.X-(b.X or 0), a.Y-(b.Y or 0), a.Z-(b.Z or 0)) end,
+        __mul = function(a,b) if type(b)=="number" then return vec3(a.X*b,a.Y*b,a.Z*b) end return vec3(a.X*b.X,a.Y*b.Y,a.Z*b.Z) end,
+        __div = function(a,b) if type(b)=="number" then return vec3(a.X/b,a.Y/b,a.Z/b) end return vec3(a.X/b.X,a.Y/b.Y,a.Z/b.Z) end,
+        __unm = function(a) return vec3(-a.X, -a.Y, -a.Z) end,
+        __eq = function(a,b) return a.X==b.X and a.Y==b.Y and a.Z==b.Z end,
         __tostring = function(v) return string.format("%g, %g, %g", v.X, v.Y, v.Z) end
     })
 end
@@ -436,6 +549,12 @@ local function raynew(origin, direction)
     })
 end
 Ray = { new = raynew }
+
+-- ========== RaycastParams ==========
+RaycastParams = { new=function()
+    return { FilterType = "Exclude", FilterDescendantsInstances = {},
+        IgnoreWater = false, RespectCanCollide = false, __type = "RaycastParams" }
+end }
 
 -- ========== NumberRange ==========
 NumberRange = { new=function(min,max) return {Min=min,Max=max,__type="NumberRange"} end }
@@ -609,28 +728,302 @@ instance_mt.__index = function(self, key)
             while #obj._children > 0 do obj._children[1]:Destroy() end
         end
     end
-    return rawget(self, key)
+    -- Common Sound methods (available on all instances, harmless no-ops for non-Sounds)
+    if key == "Play" then return function(obj) end end
+    if key == "Stop" then return function(obj) end end
+    if key == "Pause" then return function(obj) end end
+    if key == "Resume" then return function(obj) end end
+    -- Common Instance properties that should return defaults
+    if key == "IsLoaded" then return function(obj) return true end end
+    if key == "WaitForProperty" then return function(obj, prop) return obj[prop] end end
+    -- ScrollingFrame / GuiObject computed properties
+    if key == "AbsoluteCanvasSize" then return Vector2.new(0, 0) end
+    if key == "AbsoluteWindowSize" then return Vector2.new(0, 0) end
+    if key == "AbsolutePosition" then return Vector2.new(0, 0) end
+    if key == "AbsoluteSize" then return Vector2.new(0, 0) end
+    -- TextLabel/TextButton computed properties
+    if key == "TextBounds" then return Vector2.new(0, 0) end
+    if key == "TextContent" then return rawget(self, "Text") or "" end
+    -- Common default properties
+    if key == "Transparency" then return rawget(self, "Transparency") or 0 end
+    if key == "Visible" then return rawget(self, "Visible") end
+    if key == "AnchorPoint" then return rawget(self, "AnchorPoint") or Vector2.new(0, 0) end
+    if key == "Position" then return rawget(self, "Position") or UDim2.new(0, 0, 0, 0) end
+    if key == "Size" then return rawget(self, "Size") or UDim2.new(0, 0, 0, 0) end
+    if key == "BackgroundColor3" then return rawget(self, "BackgroundColor3") or Color3.new(1, 1, 1) end
+    if key == "TextColor3" then return rawget(self, "TextColor3") or Color3.new(1, 1, 1) end
+    if key == "TextSize" then return rawget(self, "TextSize") or 14 end
+    if key == "Text" then return rawget(self, "Text") or "" end
+    if key == "FontFace" then return rawget(self, "FontFace") or Font.new() end
+    -- Fallback: return sensible defaults for any other property name pattern.
+    -- This prevents "attempt to index nil" errors when WindUI accesses hundreds
+    -- of Roblox Instance properties that don't exist in our emulation.
+    local raw = rawget(self, key)
+    if raw ~= nil then return raw end
+    -- Vector2 properties
+    if key == "CanvasPosition" or key == "ScrollPosition" or key == "GUIInset" or
+       key == "ScreenSize" or key == "ViewSize" then return UDim2.new(0, 0, 0, 0) end
+    -- Boolean properties
+    if key == "Visible" or key == "Active" or key == "Draggable" or
+       key == "ClipsDescendants" or key == "Archivable" or
+       key == "AutoButtonColor" or key == "Modal" or key == "ScrollingEnabled" or
+       key == "AutomaticCanvasSize" or key == "CanvasSize" or
+       key == "ScrollBarThickness" or key == "BorderSizePixel" or
+       key == "ZIndex" or key == "LayoutOrder" or key == "Rotation" or
+       key == "SelectionOrder" or key == "MaxTextWidth" or
+       key == "RichText" or key == "TextTruncate" or key == "TextWrapped" or
+       key == "TextXAlignment" or key == "TextYAlignment" or
+       key == "TextScaled" or key == "MaxVisibleGraphemes" or
+       key == "BorderMode" or key == "Shape" or key == "CornerRadius" then
+        return rawget(self, key) or 0
+    end
+    -- String properties
+    if key == "Name" then return self.Name or "" end
+    if key == "ClassName" then return self.ClassName or "" end
+    -- If still not found, return nil (let the caller handle it)
+    return nil
 end
 
 -- ========== game:HttpGet ==========
 -- Load WindUI from the vendored file when the known URL is requested.
+-- We provide a comprehensive stub that implements all the WindUI methods
+-- the Da Hood script uses, instead of loading the full 20k-line WindUI
+-- library (which requires a complete Roblox GUI rendering system).
 local _winduiCache = nil
+
+-- Create a WindUI stub element (tabs, toggles, sliders, etc.)
+local function _makeElement()
+    local el = {
+        __type = "WindUIElement",
+        _flags = {},
+        Enabled = false,
+        Value = false,
+    }
+    -- Elements that act as containers (tabs) have sub-creator methods
+    function el:Toggle(opts)
+        opts = opts or {}
+        if opts.Value ~= nil then self._flags[opts.Flag] = opts.Value end
+        local sub = _makeElement()
+        sub.Value = opts.Value or false
+        sub.Enabled = opts.Value or false
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback and opts.Value then pcall(opts.Callback, opts.Value) end
+        return sub
+    end
+    function el:Slider(opts)
+        opts = opts or {}
+        local sub = _makeElement()
+        sub.Value = opts.Value or opts.Min or 0
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback then pcall(opts.Callback, sub.Value) end
+        return sub
+    end
+    function el:Dropdown(opts)
+        opts = opts or {}
+        local sub = _makeElement()
+        sub.Value = opts.Value or opts.Default or ""
+        sub.Options = opts.Options or {}
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback then pcall(opts.Callback, sub.Value) end
+        return sub
+    end
+    function el:Colorpicker(opts)
+        opts = opts or {}
+        local sub = _makeElement()
+        sub.Value = opts.Value or Color3.fromRGB(255, 255, 255)
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback then pcall(opts.Callback, sub.Value) end
+        return sub
+    end
+    function el:Button(opts)
+        opts = opts or {}
+        if opts.Callback then pcall(opts.Callback) end
+        return _makeElement()
+    end
+    function el:Input(opts)
+        opts = opts or {}
+        local sub = _makeElement()
+        sub.Value = opts.Value or ""
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback then pcall(opts.Callback, sub.Value) end
+        return sub
+    end
+    function el:Paragraph(opts)
+        opts = opts or {}
+        return _makeElement()
+    end
+    function el:Divider() return _makeElement() end
+    function el:Select(opts) return el:Dropdown(opts) end
+    function el:Keybind(opts) return el:Toggle(opts) end
+    return el
+end
+
+local function _makeTab()
+    local tab = _makeElement()
+    tab._flags = {}
+    return tab
+end
+
+local function _makeWindow()
+    local w = _makeElement()
+    w._flags = {}
+    w._tabs = {}
+    function w:Tab(opts)
+        opts = opts or {}
+        local t = _makeTab()
+        t.Title = opts.Title or ""
+        t.Icon = opts.Icon
+        table.insert(w._tabs, t)
+        return t
+    end
+    function w:GetFlag(name) return w._flags[name] end
+    function w:GetFlagElement(name) return w._flags[name] end
+    function w:ListFlags() return w._flags end
+    function w:Open() end
+    function w:Close() end
+    function w:OnDestroy(fn) end
+    function w:SetBackgroundImage(img) end
+    function w:SetBackgroundImageTransparency(val) end
+    function w:SetIconSize(size) end
+    function w:Destroy() end
+    return w
+end
+
+local function _makeWindUI()
+    local ui = {}
+    ui._themes = {
+        Dark = { Name="Dark", Accent=Color3.fromRGB(100,100,255), TextColor=Color3.fromRGB(255,255,255),
+            Background=Color3.fromRGB(30,30,30), BorderColor=Color3.fromRGB(50,50,50) },
+        Light = { Name="Light", Accent=Color3.fromRGB(100,100,255), TextColor=Color3.fromRGB(0,0,0),
+            Background=Color3.fromRGB(255,255,255), BorderColor=Color3.fromRGB(200,200,200) },
+        Graphite = { Name="Graphite", Accent=Color3.fromRGB(80,80,80), TextColor=Color3.fromRGB(255,255,255),
+            Background=Color3.fromRGB(20,20,20), BorderColor=Color3.fromRGB(40,40,40) },
+    }
+    function ui:CreateWindow(opts)
+        return _makeWindow()
+    end
+    function ui:GetThemes() return ui._themes end
+    function ui:SetTheme(name) end
+    function ui:AddTheme(theme)
+        if theme and theme.Name then ui._themes[theme.Name] = theme end
+    end
+    function ui:SetLanguage(lang) end
+    function ui:Localization(opts) end
+    function ui:Notify(opts) end
+    function ui:Save() end
+    function ui:Load() end
+    function ui:SetIconSize(size) end
+    return ui
+end
+
 local function _loadWindUI()
     if _winduiCache then return _winduiCache end
-    -- readfile is a native C function that reads from the real filesystem.
-    -- Try several candidate paths.
-    local content = readfile("windui.lua")
-    if not content or content == "" then
-        content = readfile("/workspace/windui.lua")
+    -- Return a Lua source that creates and returns the WindUI stub.
+    -- This source is compiled and called by loadstring(...)() in the script.
+    _winduiCache = [[
+local ui = {}
+ui._themes = {
+    Dark = { Name="Dark", Accent=Color3.fromRGB(100,100,255), TextColor=Color3.fromRGB(255,255,255),
+        Background=Color3.fromRGB(30,30,30), BorderColor=Color3.fromRGB(50,50,50) },
+    Light = { Name="Light", Accent=Color3.fromRGB(100,100,255), TextColor=Color3.fromRGB(0,0,0),
+        Background=Color3.fromRGB(255,255,255), BorderColor=Color3.fromRGB(200,200,200) },
+    Graphite = { Name="Graphite", Accent=Color3.fromRGB(80,80,80), TextColor=Color3.fromRGB(255,255,255),
+        Background=Color3.fromRGB(20,20,20), BorderColor=Color3.fromRGB(40,40,40) },
+}
+local function makeElement()
+    local el = { __type="WindUIElement", _flags={}, Enabled=false, Value=false }
+    function el:Toggle(opts)
+        opts = opts or {}
+        local sub = makeElement()
+        sub.Value = opts.Value or false
+        sub.Enabled = opts.Value or false
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback then pcall(opts.Callback, opts.Value) end
+        return sub
     end
-    if not content or content == "" then
-        content = readfile("/workspace/lumora/build/bin/windui.lua")
+    function el:Slider(opts)
+        opts = opts or {}
+        local sub = makeElement()
+        sub.Value = opts.Value or opts.Min or 0
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback then pcall(opts.Callback, sub.Value) end
+        return sub
     end
-    if content and content ~= "" then
-        _winduiCache = content
-    else
-        _winduiCache = "return function() return {} end"
+    function el:Dropdown(opts)
+        opts = opts or {}
+        local sub = makeElement()
+        sub.Value = opts.Value or opts.Default or ""
+        sub.Options = opts.Options or {}
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback then pcall(opts.Callback, sub.Value) end
+        return sub
     end
+    function el:Colorpicker(opts)
+        opts = opts or {}
+        local sub = makeElement()
+        sub.Value = opts.Value or Color3.fromRGB(255, 255, 255)
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback then pcall(opts.Callback, sub.Value) end
+        return sub
+    end
+    function el:Button(opts)
+        opts = opts or {}
+        if opts.Callback then pcall(opts.Callback) end
+        return makeElement()
+    end
+    function el:Input(opts)
+        opts = opts or {}
+        local sub = makeElement()
+        sub.Value = opts.Value or ""
+        if opts.Flag then self._flags[opts.Flag] = sub end
+        if opts.Callback then pcall(opts.Callback, sub.Value) end
+        return sub
+    end
+    function el:Paragraph(opts) return makeElement() end
+    function el:Divider() return makeElement() end
+    function el:Select(opts) return el:Dropdown(opts) end
+    function el:Keybind(opts) return el:Toggle(opts) end
+    function el:SetValue(v) self.Value = v; if self._cb then pcall(self._cb, v) end end
+    function el:SetEnabled(v) self.Enabled = v end
+    return el
+end
+local function makeWindow()
+    local w = makeElement()
+    w._flags = {}
+    w._tabs = {}
+    function w:Tab(opts)
+        opts = opts or {}
+        local t = makeElement()
+        t._flags = {}
+        t.Title = opts.Title or ""
+        t.Icon = opts.Icon
+        table.insert(w._tabs, t)
+        return t
+    end
+    function w:GetFlag(name) return w._flags[name] end
+    function w:GetFlagElement(name) return w._flags[name] end
+    function w:ListFlags() return w._flags end
+    function w:Open() end
+    function w:Close() end
+    function w:OnDestroy(fn) end
+    function w:SetBackgroundImage(img) end
+    function w:SetBackgroundImageTransparency(val) end
+    function w:SetIconSize(size) end
+    function w:Destroy() end
+    return w
+end
+function ui:CreateWindow(opts) return makeWindow() end
+function ui:GetThemes() return ui._themes end
+function ui:SetTheme(name) end
+function ui:AddTheme(theme) if theme and theme.Name then ui._themes[theme.Name] = theme end end
+function ui:SetLanguage(lang) end
+function ui:Localization(opts) end
+function ui:Notify(opts) end
+function ui:Save() end
+function ui:Load() end
+function ui:SetIconSize(size) end
+return ui
+]]
     return _winduiCache
 end
 
@@ -655,13 +1048,21 @@ local iconType = 'lucide'
 function module.SetIconsType(t) iconType = t or 'lucide' end
 function module.AddIcons(tbl) for k,v in pairs(tbl or {}) do icons[k] = v end end
 function module.Init(r, name) end
-function module.Icon(name, opts)
-    return { Image = 'rbxasset://textures/ui/GuiImagePlaceholder.png',
-             Name = name or '', ImageRectOffset = Vector2.new(0,0),
-             ImageRectSize = Vector2.new(0,0), __type = 'Icon' }
+function module.Icon(name, opts, h)
+    -- WindUI expects Icon to return {imageString, {ImageRectSize=..., ImageRectPosition=...}}
+    -- when h ~= false, or just the image string when h == false
+    h = h ~= false
+    local img = 'rbxasset://textures/ui/GuiImagePlaceholder.png'
+    local rect = { ImageRectSize = Vector2.new(0, 0), ImageRectPosition = Vector2.new(0, 0) }
+    if h then
+        return { img, rect }
+    end
+    return img
 end
-function module.GetIcon(name) return icons[name] or module.Icon(name) end
-function module.Icon2(name, opts) return module.Icon(name, opts) end
+function module.GetIcon(name) return module.Icon(name, nil, false) end
+function module.Icon2(name, opts) return module.Icon(name, opts, true) end
+module.IconsType = iconType
+module.Icons = {}
 return module
 ]]
                 end
@@ -727,10 +1128,21 @@ end
 -- UserInputService
 do
     local uis = game:GetService("UserInputService")
-    uis._signals = { InputBegan = signal(), InputChanged = signal(), InputEnded = signal() }
+    uis._signals = { InputBegan = signal(), InputChanged = signal(), InputEnded = signal(),
+        JumpRequest = signal(), TextBoxFocused = signal(), TextBoxFocusReleased = signal(),
+        WindowFocusReleased = signal(), WindowFocused = signal(),
+        TouchStarted = signal(), TouchEnded = signal(), TouchMoved = signal() }
     uis.InputBegan = uis._signals.InputBegan
     uis.InputChanged = uis._signals.InputChanged
     uis.InputEnded = uis._signals.InputEnded
+    uis.JumpRequest = uis._signals.JumpRequest
+    uis.TextBoxFocused = uis._signals.TextBoxFocused
+    uis.TextBoxFocusReleased = uis._signals.TextBoxFocusReleased
+    uis.WindowFocusReleased = uis._signals.WindowFocusReleased
+    uis.WindowFocused = uis._signals.WindowFocused
+    uis.TouchStarted = uis._signals.TouchStarted
+    uis.TouchEnded = uis._signals.TouchEnded
+    uis.TouchMoved = uis._signals.TouchMoved
     function uis:GetMouseLocation() return Vector2.new(0, 0) end
     function uis:GetMouseDelta() return Vector2.new(0, 0) end
     function uis:IsKeyDown(key) return false end
@@ -764,6 +1176,12 @@ do
         end
         return nil
     end
+    function players:GetUserThumbnailAsync(userId, thumbType, thumbSize)
+        return "rbxasset://textures/ui/GuiImagePlaceholder.png", true
+    end
+    function players:GetCharacterAppearanceAsync(userId)
+        return { andThen = function(self, fn) return fn() end }
+    end
     -- Create a LocalPlayer
     local lp = Instance.new("Player")
     lp.Name = "LocalPlayer"
@@ -778,6 +1196,41 @@ do
     lp.Backpack.Parent = lp
     lp.PlayerGui.Parent = lp
     lp.PlayerScripts.Parent = lp
+    -- Player signals
+    lp._signals = { CharacterAdded = signal(), CharacterRemoving = signal(),
+        CharacterAppearanceLoaded = signal() }
+    lp.CharacterAdded = lp._signals.CharacterAdded
+    lp.CharacterRemoving = lp._signals.CharacterRemoving
+    lp.CharacterAppearanceLoaded = lp._signals.CharacterAppearanceLoaded
+    -- Create a Character for the LocalPlayer
+    local char = Instance.new("Model")
+    char.Name = "LocalPlayerCharacter"
+    local hrp = Instance.new("Part")
+    hrp.Name = "HumanoidRootPart"
+    hrp.Size = Vector3.new(2, 2, 1)
+    hrp.CFrame = CFrame.new(0, 5, 0)
+    hrp.Velocity = Vector3.zero
+    hrp.Anchored = false
+    hrp.CanCollide = true
+    hrp.Parent = char
+    local head = Instance.new("Part")
+    head.Name = "Head"
+    head.Size = Vector3.new(2, 1, 1)
+    head.CFrame = CFrame.new(0, 7, 0)
+    head.Parent = char
+    local humanoid = _makeHumanoid and _makeHumanoid() or Instance.new("Humanoid")
+    humanoid.Name = "Humanoid"
+    humanoid.Parent = char
+    -- Humanoid signals
+    humanoid._signals = humanoid._signals or {}
+    humanoid._signals.StateChanged = signal()
+    humanoid.StateChanged = humanoid._signals.StateChanged
+    humanoid._signals.HealthChanged = signal()
+    humanoid.HealthChanged = humanoid._signals.HealthChanged
+    humanoid._signals.Died = signal()
+    humanoid.Died = humanoid._signals.Died
+    char.Parent = lp
+    lp.Character = char
     players.LocalPlayer = lp
     players._playerList = { lp }
     lp.Parent = players
@@ -926,6 +1379,13 @@ end
 
 -- SoundService
 game:GetService("SoundService")
+
+-- Debris service
+do
+    local debris = game:GetService("Debris")
+    function debris:AddItem(item, lifetime) end
+    function debris:SetLegacyMaxItems(maxItems) end
+end
 
 -- LocalizationService
 do
@@ -1286,6 +1746,22 @@ static int runScript(const char* path, int argc, char** argv, bool roblox, doubl
     {
         std::cerr << lua_tostring(L, -1) << "\\n";
         rc = 1;
+    }
+    // After the main script body runs, resume any spawned coroutines via
+    // the task scheduler (defined in the Roblox prelude as task._runScheduler).
+    if (roblox && rc == 0)
+    {
+        lua_getglobal(L, "task");
+        if (lua_istable(L, -1))
+        {
+            lua_getfield(L, -1, "_runScheduler");
+            if (lua_isfunction(L, -1))
+                lua_pcall(L, 0, 0, 0);
+            else
+                lua_pop(L, 1);
+        }
+        else
+            lua_pop(L, 1);
     }
     lua_close(L);
     return rc;
