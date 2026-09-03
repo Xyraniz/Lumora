@@ -88,8 +88,11 @@ workspace = root:GetService("Workspace")
 workspace.Name = "Workspace"
 
 Enum = setmetatable({}, { __index = function(_, enumName)
-    local t = { Name=enumName }
-    setmetatable(t, { __index = function(e, item) return { Name=item, EnumType=e, Value=0, __type="EnumItem" } end, __tostring=function() return "Enum."..enumName end })
+    local t = { Name=enumName, __type="EnumType", _items={} }
+    rawset(_, enumName, t)
+    function t:FromName(name) return self[name] end
+    function t:FromValue(value) for _, item in ipairs(self._items) do if item.Value==value then return item end end return nil end
+    setmetatable(t, { __metatable="The metatable is locked", __index = function(e, item) local v=setmetatable({ Name=item, EnumType=e, Value=0, __type="EnumItem" }, { __tostring=function() return "Enum."..enumName.."."..item end }); rawset(e, item, v); table.insert(e._items, v); return v end, __tostring=function() return "Enum."..enumName end })
     return t
 end })
 
@@ -124,6 +127,8 @@ clonefunction = function(f) assert(type(f)=="function", "function expected"); re
 getfenv = function(_) return _ENV end
 setfenv = function(_, env) return env end
 if not table.freeze then table.freeze=function(t) return t end end
+utf8.nfcnormalize = utf8.nfcnormalize or function(s) return s end
+utf8.nfdnormalize = utf8.nfdnormalize or function(s) return s end
 )LUA";
 
 static bool installPrelude(lua_State* L)
