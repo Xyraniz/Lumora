@@ -1,76 +1,185 @@
-# Lumora
+<div align="center">
+  <img src="assets/lumora-logo.png" alt="Lumora logo" width="180" />
+  <h1>Lumora</h1>
+  <p><strong>Un runtime headless de Luau para ejecutar, inspeccionar y validar scripts fuera de Roblox Studio.</strong></p>
+  <p>
+    <a href="https://github.com/Xyraniz/Lumora/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Xyraniz/Lumora?style=flat-square" alt="MIT License" /></a>
+    <a href="https://github.com/Xyraniz/Lumora"><img src="https://img.shields.io/github/languages/top/Xyraniz/Lumora?style=flat-square" alt="Top language" /></a>
+    <a href="https://github.com/Xyraniz/Lumora/issues"><img src="https://img.shields.io/github/issues/Xyraniz/Lumora?style=flat-square" alt="Issues" /></a>
+  </p>
+</div>
 
-Lumora es un runtime autocontenido de **Luau** para ejecutar y validar el output generado por Fengetheus fuera de Roblox Studio. Usa los fuentes oficiales de Luau vendorizados en `vendor/luau`, añade una capa headless de compatibilidad Roblox y mantiene una interfaz CLI reproducible para automatización y pruebas.
+Lumora es un ejecutable autocontenido construido sobre los fuentes oficiales de [Luau](https://luau.org). Su objetivo es ofrecer una superficie de ejecución **headless, reproducible y automatizable** para scripts `.lua` y `.luau` que necesitan una capa compatible con patrones frecuentes de Roblox, sin depender de Roblox Studio, una ventana gráfica o un cliente del juego.
 
-## Requisitos y build reproducible
+El proyecto combina la VM y el compilador de Luau vendorizados en `vendor/luau` con un prelude aislado de compatibilidad Roblox. El resultado es una herramienta pequeña y directa para pruebas de regresión, validación de output generado, análisis de scripts y pipelines de CI. En particular, Lumora sirve como etapa de ejecución para [Fengetheus](https://github.com/Xyraniz/Fengetheus): recibe el archivo generado, prepara el entorno esperado y devuelve stdout, errores y código de salida de forma controlable.
 
-En Debian/Ubuntu se necesita un compilador C++17, CMake y Ninja. No se requiere una instalación del sistema de Luau ni una descarga durante el build.
+> **Lumora no es Roblox Studio ni un motor 3D.** Emula una superficie headless enfocada en ejecución y validación; no pretende renderizar experiencias, conectarse a servicios reales ni ejecutar un juego completo.
+
+## Por qué Lumora
+
+Los runtimes independientes de Luau suelen enfocarse en programación general o en ofrecer una experiencia de scripting completa. Lumora toma una dirección más específica: prioriza la **compatibilidad práctica con scripts que esperan primitivas Roblox**, junto con una CLI estable para automatización. La herramienta arranca con el entorno Roblox emulado por defecto, permite desactivarlo para probar Luau puro y ofrece salida JSON para integrarse sin ambigüedades con otros procesos.
+
+| Necesidad | Respuesta de Lumora |
+| --- | --- |
+| Ejecutar Luau sin Roblox Studio | VM y compilador oficiales de Luau integrados en un binario local. |
+| Validar scripts que usan primitivas Roblox | Prelude headless con `game`, `workspace`, `Instance`, `Enum`, `task`, tipos y servicios frecuentes. |
+| Integrar ejecución en CI o pipelines | CLI sin interfaz gráfica, códigos de salida previsibles y modo `--json`. |
+| Evitar procesos que se quedan bloqueados | Timeout cooperativo en Luau y barrera de seguridad a nivel de proceso. |
+| Probar comportamientos deterministas | RNG basado en PCG32 y suites de contrato para APIs emuladas. |
+
+## Características principales
+
+Lumora acepta archivos `.lua` y `.luau` directamente, conserva la biblioteca estándar de Luau y soporta sintaxis moderna del compilador. La capa Roblox incluye jerarquías de instancias, servicios, atributos, señales, enumeraciones, tipos de datos y un scheduler cooperativo reducido. Las funciones que dependen de un cliente, una ventana o una red real se mantienen como stubs seguros o comportamientos headless explícitos.
+
+La salida normal conserva el stdout del script. Con `--json`, Lumora devuelve un objeto estructurado con el resultado de la ejecución, stdout, stderr, error y código de salida, lo que permite consumirlo desde Fengetheus, scripts de shell, runners de pruebas o herramientas escritas en otros lenguajes.
+
+## Instalación y compilación
+
+### Requisitos
+
+Se necesita un compilador C++17, [CMake](https://cmake.org) y [Ninja](https://ninja-build.org). Los fuentes de Luau ya están incluidos en el repositorio, por lo que el build no requiere instalar Luau por separado ni descargar dependencias durante la compilación.
+
+En Debian o Ubuntu:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y build-essential cmake ninja-build
-make
-make test
 ```
 
-El ejecutable principal y nombre recomendado son `bin/lumora`. También se genera `bin/luau-vm` únicamente como alias de compatibilidad para scripts existentes que aún usan ese nombre; los nuevos comandos y pipelines deben invocar `lumora`. El lanzador `bin/run` delega al ejecutable principal, por lo que ambos estilos son válidos:
+### Build reproducible
+
+Desde la raíz del repositorio:
+
+```bash
+make
+```
+
+El ejecutable recomendado queda disponible en `bin/lumora`. El build también crea `bin/luau-vm` como alias de compatibilidad para scripts antiguos y conserva `bin/run` como lanzador conveniente.
 
 ```bash
 ./bin/lumora script.lua argumento1 argumento2
 ./bin/run script.lua argumento1 argumento2
 ```
 
-## CLI
+## Uso de la CLI
 
 ```text
 lumora [--no-roblox] [--json] [--timeout seconds] script.lua [args...]
 ```
 
-`--no-roblox` omite el prelude de compatibilidad y permite probar Luau puro. `--json` devuelve `{ok, stdout, stderr, error, exitCode}` y captura la ejecución en un proceso aislado. `--timeout 5` instala una interrupción cooperativa en Luau y una barrera de seguridad de proceso para que un `while true do end` no bloquee el pipeline. `--help` y `--version` son operaciones sin efectos secundarios.
+El modo Roblox headless está activado por defecto. `--no-roblox` omite el prelude y ejecuta el archivo con Luau puro. `--json` captura la ejecución y escribe un único objeto JSON. `--timeout 5` limita la ejecución a cinco segundos y evita que un bucle infinito bloquee el pipeline. `--help` y `--version` no ejecutan ningún script.
 
-Los argumentos se exponen con la convención habitual de Lua: `arg[0]` contiene la ruta del script y `arg[1]` en adelante contienen los argumentos del usuario.
+Los argumentos siguen la convención habitual de Lua: `arg[0]` contiene la ruta del script y `arg[1]` en adelante contienen los argumentos proporcionados por el usuario.
 
-## API emulada
+### Ejemplos
 
-| Área | Superficie disponible |
-| --- | --- |
-| Árbol Roblox | `game`, `workspace`, `Instance.new`, `GetService`, `GetChildren`, `FindFirstChild`, `WaitForChild`, `GetFullName`, `Destroy`, `IsA` |
-| Jerarquía | `Parent`, reparenting sin duplicados, `ChildAdded`, `ChildRemoved` |
-| Eventos | `Connect`, `Disconnect`, `Connected`, `Fire`, `AttributeChanged` |
-| Atributos | `GetAttribute`, `SetAttribute` |
-| Enumeraciones | `Enum.X.Y`, `Name`, `EnumType`, `FromName`, `FromValue`, `Value` |
-| Tipos | `typeof`, `Vector2.new`, `UDim2.new`, `UDim2.fromScale`, `UDim2.fromOffset`, `Path2D.new` |
-| Scheduling | `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.wait` |
-| Funciones | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv` |
-| Random | `Random.new(seed)`, `NextInteger`, `NextNumber`, `NextUnitVector`, `Clone`, con estado PCG32 determinista |
-| Biblioteca | Biblioteca estándar Luau, `bit32`, `string.pack/unpack`, `buffer`, `utf8` y sintaxis moderna del compilador |
-
-La API está implementada en un prelude aislado para que los casos generados por Fengetheus puedan extenderse sin modificar la VM. El RNG usa la familia PCG32 y la inicialización/transformación documentadas en el runtime oficial de Luau; la paridad byte a byte con una versión concreta de Roblox debe fijarse mediante vectores dorados obtenidos de esa versión.
-
-## Tests
+Ejecutar un script con la capa Roblox:
 
 ```bash
-make test
-# equivalente:
-ctest --test-dir build --output-on-failure
+./bin/lumora examples/hello.lua
 ```
 
-Las suites cubren argumentos y stdout, `--json`, timeout, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta/baja de hijos, atributos, enumeraciones, tipos compatibles con las comprobaciones de Fengetheus, destrucción recursiva, llamadas con `:` y scheduling/cancelación básica.
+Ejecutar Luau sin globals Roblox:
 
-Para inspeccionar la salida estructurada:
+```bash
+./bin/lumora --no-roblox tests/luau_modern.lua
+```
+
+Consumir una respuesta estructurada:
 
 ```bash
 ./bin/lumora --json tests/roblox_api.lua
 ```
 
+Proteger un runner contra loops que no terminan:
+
+```bash
+./bin/lumora --json --timeout 2 generated.luau
+```
+
+Una ejecución correcta produce `exitCode: 0` y `ok: true`. Los errores del script producen una respuesta con `ok: false`; las opciones inválidas o errores de invocación de la CLI utilizan código de salida `2`.
+
+## Superficie Roblox emulada
+
+La tabla siguiente resume la API cubierta por el prelude actual. La compatibilidad es deliberadamente **headless**: las operaciones sin equivalente local se representan con stubs, valores seguros o colecciones vacías en lugar de intentar conectarse a servicios externos.
+
+| Área | Superficie disponible |
+| --- | --- |
+| Árbol de instancias | `game`, `workspace`, `Instance.new`, `GetService`, `GetChildren`, `FindFirstChild`, `FindFirstChildOfClass`, `WaitForChild`, `GetFullName`, `Destroy`, `IsA`. |
+| Jerarquía | `Parent`, reparenting sin duplicados, `ChildAdded`, `ChildRemoved` y destrucción recursiva. |
+| Eventos y señales | `Connect`, `Once`, `Disconnect`, `Connected`, `DisconnectAll`, `Fire`, `AttributeChanged`. |
+| Atributos | `GetAttribute` y `SetAttribute`. |
+| Enumeraciones | `Enum.X.Y`, `Name`, `EnumType`, `FromName`, `FromValue` y `Value`. |
+| Tipos de datos | `typeof`, `Vector2`, `Vector3`, `UDim`, `UDim2`, `CFrame`, `Color3`, `BrickColor`, `Ray`, `RaycastParams`, `NumberRange`, `NumberSequence`, `ColorSequence`, `Font`, `Rect`, `Path2D` y `TweenInfo`. |
+| Scheduling | `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.wait`, además de los aliases globales habituales. |
+| Funciones de entorno | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv` y stubs de funciones de executor. |
+| Aleatoriedad | `Random.new(seed)`, `NextInteger`, `NextNumber`, `NextUnitVector` y `Clone`, con estado PCG32 determinista. |
+| Biblioteca Luau | Biblioteca estándar, `bit32`, `string.pack/unpack`, `buffer`, `utf8` y sintaxis moderna del compilador. |
+
+La implementación se mantiene en un prelude aislado dentro de `src/main.cpp`. Esta decisión permite ampliar la superficie de compatibilidad sin modificar la VM vendorizada ni acoplarla a un cliente gráfico. La paridad exacta con una versión concreta de Roblox debe comprobarse mediante vectores dorados de esa versión; Lumora prioriza la compatibilidad observable que necesitan sus tests y pipelines.
+
+## Arquitectura del repositorio
+
+| Ruta | Responsabilidad |
+| --- | --- |
+| `src/main.cpp` | CLI, compilación y ejecución Luau, prelude Roblox, captura JSON, timeout y códigos de salida. |
+| `vendor/luau` | Fuentes oficiales vendorizados de Luau, incluyendo VM, compilador y biblioteca común. |
+| `tests/` | Smoke tests, contratos de CLI, sintaxis moderna, API Roblox, jerarquía, señales y scheduling. |
+| `CMakeLists.txt` | Target C++17, integración de Luau, generación del ejecutable y registro de CTest. |
+| `Makefile` | Atajos reproducibles para compilar, probar y limpiar. |
+| `bin/run` | Lanzador que resuelve la raíz del repositorio y delega en `bin/lumora`. |
+| `assets/lumora-logo.png` | Marca visual principal del proyecto para README, documentación y distribución. |
+
+El flujo de ejecución es intencionalmente simple:
+
+```text
+script.lua / script.luau
+        │
+        ▼
+CLI de Lumora ──► compilador Luau ──► VM Luau
+        │                              │
+        │                              ├─ Prelude Roblox headless
+        │                              ├─ Scheduler cooperativo
+        │                              └─ Timeout / interrupción
+        ▼
+stdout, stderr, código de salida o resultado JSON
+```
+
+## Pruebas
+
+La suite se ejecuta con:
+
+```bash
+make test
+```
+
+El equivalente directo es:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+Las pruebas cubren argumentos y stdout, `--json`, timeouts, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta y baja de hijos, atributos, enumeraciones, tipos compatibles con las comprobaciones de Fengetheus, destrucción recursiva, llamadas con `:`, scheduling y cancelación básica.
+
 ## Relación con Fengetheus
 
-Fengetheus genera archivos `.lua` o `.luau` y puede seleccionar Luau como destino. Lumora es el paso de ejecución posterior: recibe el archivo directamente, aporta el entorno Roblox mínimo esperado por código ofuscado y devuelve un resultado reproducible para tests o pipelines de validación.
+[Fengetheus](https://github.com/Xyraniz/Fengetheus) genera archivos `.lua` o `.luau` y puede seleccionar Luau como destino. Lumora ocupa la etapa posterior: recibe el archivo generado, prepara un entorno compatible mínimo y produce un resultado reproducible para tests, validación de output y automatización. Esta separación mantiene a Fengetheus enfocado en generación y a Lumora enfocado en ejecución controlada.
 
-## Compatibilidad y alcance
+## Alcance y no objetivos
 
-El compilador y la VM son Luau oficial. La capa Roblox es una emulación headless orientada a ejecutar y validar output, no un reemplazo de Roblox Studio ni del motor 3D. Los mensajes de error nativos de Luau se conservan; los mensajes de APIs Roblox emuladas se aproximan y se mantienen cubiertos por regresiones donde resulta práctico.
+Lumora está pensado para ejecutar y validar scripts en un entorno local, no para reemplazar Roblox. No renderiza UI, no simula el motor físico, no abre una ventana, no ofrece conectividad Roblox real y no garantiza que una experiencia completa funcione fuera de su plataforma. Las APIs que requieren estado externo se emulan de forma segura y deben tratarse como contratos de compatibilidad, no como acceso a servicios productivos.
+
+## Contribuir
+
+Las contribuciones deben incluir una explicación del comportamiento esperado, una prueba de regresión cuando sea posible y una descripción clara de cualquier diferencia respecto a Luau o Roblox. Para cambios en el prelude, conviene añadir un caso pequeño y determinista a `tests/` antes de ampliar la superficie. Los pull requests que cambien la CLI deben conservar los códigos de salida y el formato JSON documentados en este archivo.
 
 ## Licencia
 
-El código de Lumora mantiene la licencia del repositorio. Luau vendorizado conserva sus avisos y licencia originales en `vendor/luau`.
+Lumora se distribuye bajo la [licencia MIT](LICENSE). Los fuentes vendorizados de Luau conservan sus avisos y condiciones originales dentro de `vendor/luau`.
+
+## Referencias
+
+[1]: https://luau.org "Luau"
+[2]: https://github.com/lune-org/lune "Lune — standalone Luau runtime"
+[3]: https://github.com/luau-lang/lute "Lute — standalone Luau runtime for general-purpose programming"
+[4]: https://github.com/Xyraniz/Fengetheus "Fengetheus"

@@ -269,8 +269,11 @@ function tasklib.spawn(fn, ...)
 end
 
 function tasklib.delay(seconds, fn, ...)
-    -- delay just spawns but yields first; for our purposes, spawn immediately
-    return tasklib.spawn(fn, ...)
+    -- Keep delayed work pending until the scheduler. This preserves the
+    -- cancellation window expected by Roblox-style code and contracts.
+    local co = coroutine.create(fn)
+    tasklib._threads[co] = table.pack(...)
+    return co
 end
 
 function tasklib.cancel(co)
