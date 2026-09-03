@@ -1,0 +1,15 @@
+local p = Instance.new("Part", workspace)
+p.Name = "Probe"
+assert(p.Parent == workspace)
+assert(workspace:FindFirstChild("Probe") == p)
+local hit = false
+local connection = p.ChildAdded:Connect(function() hit = true end)
+Instance.new("Folder", p)
+assert(hit and connection.Connected)
+connection:Disconnect()
+assert(not connection.Connected)
+assert(typeof(p) == "Instance")
+assert(Enum.Material.Neon.Name == "Neon")
+local r = Random.new(7)
+assert(r:NextInteger(1, 10) >= 1)
+print(p:GetFullName())

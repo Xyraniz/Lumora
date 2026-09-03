@@ -27,4 +27,5 @@ add_custom_command(TARGET luau-vm POST_BUILD
 include(CTest)
 if(BUILD_TESTING)
     add_test(NAME smoke COMMAND ${CMAKE_SOURCE_DIR}/tests/smoke.sh $<TARGET_FILE:luau-vm>)
+    add_test(NAME roblox_api COMMAND $<TARGET_FILE:luau-vm> ${CMAKE_SOURCE_DIR}/tests/roblox_api.lua)
 endif()
