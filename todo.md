@@ -57,11 +57,11 @@
 ## Fase 8 — Distribución y portabilidad
 
 - [x] 8.1 Reducir dependencia Unix-específica (fork/waitpid) o proveer fallback multiplataforma
-- [ ] 8.2 Documentar matriz de plataformas soportadas
-- [ ] 8.3 Añadir notas de releases y checksums en README
+- [x] 8.2 Documentar matriz de plataformas soportadas
+- [x] 8.3 Añadir notas de releases y checksums en README
 
 ## Fase 9 — Commits y entrega
 
 - [x] 9.1 Hacer commits periódicos a rama main con identidad Xyraniz
-- [ ] 9.2 Verificacián final: build limpio + todos los tests pasan
-- [ ] 9.3 Push final a main
+- [x] 9.2 Verificacián final: build limpio + todos los tests pasan
+- [x] 9.3 Push final a main
