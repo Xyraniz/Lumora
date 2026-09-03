@@ -40,11 +40,11 @@
 
 ## Fase 6 — Ampliar calidad de ingeniería ( — *hecho: main.cpp(165) + prelude.cpp(1948) + runtime.cpp(127) + json.cpp(20) + lumora.h(21)*Prioridad media)
 
-- [ ] 6.1 Añadir GitHub Actions CI ( — *hecho: main.cpp(165) + prelude.cpp(1948) + runtime.cpp(127) + json.cpp(20) + lumora.h(21)*Linux, macOS, Windows; GCC y Clang; Debug y Release; CTest)
-- [ ] 6.2 Añadir versionado semántico real y changelog ( — *hecho: main.cpp(165) + prelude.cpp(1948) + runtime.cpp(127) + json.cpp(20) + lumora.h(21)*CHANGELOG.md)
-- [ ] 6.3 Matriz de compatibilidad por API ( — *hecho: main.cpp(165) + prelude.cpp(1948) + runtime.cpp(127) + json.cpp(20) + lumora.h(21)*documentar implementada/parcial/stub/no soportada)
-- [ ] 6.4 Ejemplos mínimos en `examples/`
-- [ ] 6.5 Documentar cómo actualizar la versión de Luau vendorizada
+- [x] 6.1 Añadir GitHub Actions CI ( — *hecho: main.cpp(165) + prelude.cpp(1948) + runtime.cpp(127) + json.cpp(20) + lumora.h(21)*Linux, macOS, Windows; GCC y Clang; Debug y Release; CTest)
+- [x] 6.2 Añadir versionado semántico real y changelog ( — *hecho: main.cpp(165) + prelude.cpp(1948) + runtime.cpp(127) + json.cpp(20) + lumora.h(21)*CHANGELOG.md)
+- [x] 6.3 Matriz de compatibilidad por API ( — *hecho: main.cpp(165) + prelude.cpp(1948) + runtime.cpp(127) + json.cpp(20) + lumora.h(21)*documentar implementada/parcial/stub/no soportada)
+- [x] 6.4 Ejemplos mínimos en `examples/`
+- [x] 6.5 Documentar cómo actualizar la versión de Luau vendorizada
 
 ## Fase 7 — Mejorar fidelidad y tests ( — *hecho: main.cpp(165) + prelude.cpp(1948) + runtime.cpp(127) + json.cpp(20) + lumora.h(21)*Prioridad media)
 

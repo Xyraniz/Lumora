@@ -71,7 +71,7 @@ El modo Roblox headless está activado por defecto. `--no-roblox` omite el prelu
 
 Los argumentos siguen la convención habitual de Lua: `arg[0]` contiene la ruta del script y `arg[1]` en adelante contienen los argumentos proporcionados por el usuario.
 
-### Ejemplos
+### Comandos básicos
 
 Ejecutar un script con la capa Roblox:
 
@@ -130,6 +130,17 @@ Con `--json`, Lumora escribe siempre un único objeto JSON plano en stdout, sin 
 | `script` | string | Ruta del script pasada a Lumora. |
 
 El test `tests/json_schema.sh` valida este esquema con el módulo `json` de Python como parser real, comprobando que cada ruta de error produce un objeto plano con todos los campos, que `stdout` nunca contiene JSON anidado y que `timedOut` se distingue de un error de script ordinario.
+
+### Ejemplos
+
+El directorio `examples/` contiene scripts listos para ejecutar que muestran las capacidades principales:
+
+```bash
+./bin/lumora examples/hello.lua          # Instancias y typeof
+./bin/lumora examples/datatypes.lua       # Vector3, CFrame, Color3, UDim2
+./bin/lumora examples/instance_tree.lua   # Jerarquía, parenting y señales
+./bin/lumora --json examples/json_pipeline.lua  # Salida estructurada para CI
+```
 
 ## Superficie Roblox emulada
 
@@ -219,6 +230,19 @@ El flag `--sandbox` reduce la superficie disponible para el script, \u00fatil cu
 ## Alcance y no objetivos
 
 Lumora está pensado para ejecutar y validar scripts en un entorno local, no para reemplazar Roblox. No renderiza UI, no simula el motor físico, no abre una ventana, no ofrece conectividad Roblox real y no garantiza que una experiencia completa funcione fuera de su plataforma. Las APIs que requieren estado externo se emulan de forma segura y deben tratarse como contratos de compatibilidad, no como acceso a servicios productivos.
+
+## Versionado y changelog
+
+Lumora sigue [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Los cambios notables de cada versión se documentan en [CHANGELOG.md](CHANGELOG.md). La matriz detallada de compatibilidad por API (implementado, parcial, no soportado) está en [COMPATIBILITY.md](COMPATIBILITY.md).
+
+## Actualizar Luau vendorizado
+
+Los fuentes de Luau se incluyen en `vendor/luau` para garantizar builds reproducibles sin descargas externas. Para actualizar a una versión más reciente:
+
+1. Reemplazar el contenido de `vendor/luau` con la nueva versión de [luau-lang/luau](https://github.com/luau-lang/luau).
+2. Verificar que los headers `lua.h`, `lualib.h` y `Luau/Compiler.h` siguen disponibles en las rutas esperadas (`vendor/luau/VM/include` y `vendor/luau/Compiler/include`).
+3. Ejecutar `make` y `make test` para confirmar que el build y los tests pasan.
+4. Actualizar la nota de versión en `CHANGELOG.md` si hay cambios de comportamiento.
 
 ## Contribuir
 

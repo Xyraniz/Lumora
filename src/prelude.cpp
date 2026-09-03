@@ -244,7 +244,13 @@ Vector2 = { new=vec2,
     zero = vec2(0,0), one = vec2(1,1)
 }
 UDim2 = {
-    new=function(sx,ox,sy,oy) return {X={Scale=sx,Offset=ox},Y={Scale=sy,Offset=oy},__type="UDim2"} end,
+    new=function(sx,ox,sy,oy)
+        local ud = {X={Scale=sx,Offset=ox},Y={Scale=sy,Offset=oy},__type="UDim2"}
+        setmetatable(ud, { __tostring = function(v)
+            return string.format("{%g, %d, %g, %d}", v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset)
+        end })
+        return ud
+    end,
     fromScale=function(x,y) return UDim2.new(x,0,y,0) end,
     fromOffset=function(x,y) return UDim2.new(0,x,0,y) end
 }
