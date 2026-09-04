@@ -38,6 +38,7 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `Signal:DisconnectAll()` | ✅ | Desconecta todos los callbacks. |
 | `Signal:Fire(...)` | ✅ | Invoca todos los callbacks conectados. |
 | `AttributeChanged` | ✅ | Se dispara al cambiar un atributo. |
+| `GetPropertyChangedSignal(name)` | ✅ | Señal reutilizable; se dispara cuando cambia la propiedad observada. |
 | `ChildAdded` / `ChildRemoved` | ✅ | Se disparan al reparentear y destruir. |
 
 ## Tipos de datos
@@ -94,14 +95,28 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `newcclosure` / `clonefunction` | ✅ | |
 | `getfenv` / `setfenv` | ✅ | |
 | `getgenv` / `getrenv` | 🟡 | Devuelve una tabla compartida; sin aislamiento real de entornos. |
+| `setclipboard` / `getclipboard` | ✅ | Clipboard efímero en memoria del proceso; no usa el clipboard del sistema. Eliminado en `--sandbox`. |
+| `getcallstack` | ✅ | Devuelve frames serializables con fuente, línea, nombre y tipo. Eliminado en `--sandbox`. |
+| `lumora.capabilities()` | ✅ | Describe capacidades locales (`memory`, `stub`, `disabled`, `headless`). Eliminado en `--sandbox`. |
 | `loadstring` / `load` | ✅ | Compila Luau a bytecode y carga. Eliminado en `--sandbox`. |
 | Capa de executor (`hookfunction`, etc.) | 🟡 | Stubs seguros que no hacen nada; presentes para compatibilidad. Eliminados en `--sandbox`. |
+
+## Filesystem y serialización
+
+| API | Estado | Notas |
+| --- | --- | --- |
+| `writefile` / `readfile` / `appendfile` | ✅ | Contenido efímero en memoria; `readfile` falla si el archivo no existe. |
+| `isfile` / `isfolder` / `makefolder` | ✅ | Directorios virtuales creados en memoria. |
+| `delfile` / `delfolder` / `listfiles` | ✅ | Eliminación y listado determinista de entradas virtuales. |
+| `loadfile` | ✅ | Compila desde el filesystem virtual y usa el nombre lógico como chunk name. |
+| `HttpService:JSONEncode` / `JSONDecode` | ✅ | Codec JSON nativo con arrays/objetos, escapes, límites de profundidad y detección de ciclos. |
+| `json.encode` / `json.decode` | ✅ | Alias sin estado del codec de `HttpService`. |
 
 ## CLI y salida
 
 | API | Estado | Notas |
 | --- | --- | --- |
-| `--json` | ✅ | Esquema enriquecido de un solo nivel. |
+| `--json` | ✅ | Esquema enriquecido de un solo nivel con `traceback` separado. |
 | `--sandbox` | ✅ | Reduce la superficie de globals peligrosos. |
 | `--timeout seconds` | ✅ | Timeout cooperativo en Luau + barrera a nivel de proceso. |
 | `--no-roblox` | ✅ | Ejecuta Luau puro sin el prelude. |

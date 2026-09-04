@@ -24,7 +24,7 @@
 #endif
 
 // Lumora semantic version — keep in sync with CHANGELOG.md.
-static constexpr const char* kVersion = "lumora 0.2.0";
+static constexpr const char* kVersion = "lumora 0.3.0";
 
 int main(int argc, char** argv)
 {
@@ -79,11 +79,13 @@ int main(int argc, char** argv)
     auto emitJson = [](const char* kind, bool ok, const std::string& stdoutText,
                        const std::string& stderrText, const std::string& message,
                        int exitCode, double durationMs, bool timedOut, const char* scriptPath) {
+        const std::string traceback = stderrText;
         std::cout << "{\"kind\":" << jsonEscape(kind ? kind : "unknown")
                   << ",\"ok\":" << (ok ? "true" : "false")
                   << ",\"stdout\":" << jsonEscape(stdoutText)
                   << ",\"stderr\":" << jsonEscape(stderrText)
                   << ",\"message\":" << jsonEscape(message)
+                  << ",\"traceback\":" << jsonEscape(traceback)
                   << ",\"exitCode\":" << exitCode
                   << ",\"durationMs\":" << (long long)(durationMs + 0.5)
                   << ",\"timedOut\":" << (timedOut ? "true" : "false")

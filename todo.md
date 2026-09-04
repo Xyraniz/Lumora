@@ -1,5 +1,6 @@
 # Lumora — Plan para llevar las calificaciones de Manus a 10/10
 
+
 ## Fase 1 — Corregir contratos incorrectos (Prioridad crítica)
 
 - [x] 1.1 Arreglar `typeof`/`type` para reconocer TODOS los tipos emulados (que lea `__type` directamente)
@@ -65,3 +66,10 @@
 - [x] 9.1 Hacer commits periódicos a rama main con identidad Xyraniz
 - [x] 9.2 Verificacián final: build limpio + todos los tests pasan
 - [x] 9.3 Push final a main
+
+## Fase 10 — Capacidades seguras de diagnóstico y compatibilidad
+- [x] 10.1 Añadir clipboard efímero en memoria y namespace `lumora.capabilities()`.
+- [x] 10.2 Añadir stack inspection serializable y traceback separado en `--json`.
+- [x] 10.3 Añadir filesystem virtual en memoria y codec JSON nativo.
+- [x] 10.4 Añadir señales reutilizables de cambios de propiedades y contrato de regresión.
+- [x] 10.5 Verificar build limpio y 13/13 tests pasando.

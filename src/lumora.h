@@ -15,6 +15,12 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
 bool installPrelude(lua_State* L);
 void registerRobloxGlobals(lua_State* L);
 
+// host_api.cpp
+void registerHostGlobals(lua_State* L);
+
+// json.cpp
+void registerJsonGlobals(lua_State* L);
+
 // json.cpp
 std::string jsonEscape(const std::string& value);
 

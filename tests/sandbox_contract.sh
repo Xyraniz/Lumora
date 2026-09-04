@@ -12,12 +12,16 @@ assert(io == nil, "io should be nil in sandbox")
 assert(getgenv == nil, "getgenv should be nil in sandbox")
 assert(request == nil, "request should be nil in sandbox")
 assert(readfile == nil, "readfile should be nil in sandbox")
+assert(setclipboard == nil, "setclipboard should be nil in sandbox")
+assert(getclipboard == nil, "getclipboard should be nil in sandbox")
+assert(getcallstack == nil, "getcallstack should be nil in sandbox")
+assert(lumora == nil, "lumora namespace should be nil in sandbox")
 print("sandbox-ok")
 LUA
 OUT=$("$VM" --sandbox "$TMP")
 test "$OUT" = "sandbox-ok"
 
-# Without sandbox, loadstring must be present (function).
-printf 'assert(type(loadstring) == "function")\nprint("nosandbox-ok")\n' > "$TMP"
+# Without sandbox, loadstring and the host capability namespace are present.
+printf 'assert(type(loadstring) == "function")\nassert(type(setclipboard) == "function")\nassert(type(lumora) == "table")\nprint("nosandbox-ok")\n' > "$TMP"
 OUT=$("$VM" "$TMP")
 test "$OUT" = "nosandbox-ok"

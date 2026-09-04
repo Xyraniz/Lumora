@@ -4,6 +4,22 @@ All notable changes to Lumora are documented in this file. The format is based o
 
 ## [Unreleased]
 
+## [0.3.0] — 2026
+
+### Added
+- Safe host capability module with process-local `setclipboard`/`getclipboard`, serializable `getcallstack`, `lumora.capabilities()`, and a namespaced `lumora` API.
+- In-memory filesystem compatibility with virtual folders, deterministic `listfiles`, `appendfile`, `loadfile`, path validation, and recursive folder deletion.
+- Native JSON codec exposed through `HttpService:JSONEncode`, `HttpService:JSONDecode`, `json.encode`, and `json.decode`, including arrays, objects, escapes, cycle detection, and nesting limits.
+- `traceback` field in `--json` output and a traceback error handler for nested Luau runtime failures.
+- `tests/host_api_contract.lua` and expanded JSON/sandbox contracts.
+
+### Changed
+- `GetPropertyChangedSignal` now reuses signals and fires on public property changes, including `Parent` changes.
+- Executor hook names remain compatibility stubs and are not expanded into mutation, injection, or client-control features.
+
+### Security
+- Clipboard and filesystem compatibility are strictly process-local and memory-backed; no host clipboard or real filesystem access is introduced.
+
 ## [0.2.0] — 2025
 
 ### Added

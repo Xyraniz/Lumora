@@ -21,7 +21,7 @@ def run(args, content=None):
     r = subprocess.run([vm] + args, capture_output=True, text=True)
     return r
 
-required_fields = {"kind", "ok", "stdout", "stderr", "message", "exitCode", "durationMs", "timedOut", "script"}
+required_fields = {"kind", "ok", "stdout", "stderr", "message", "traceback", "exitCode", "durationMs", "timedOut", "script"}
 
 def check(obj, expected_kind=None):
     missing = required_fields - set(obj)
@@ -63,15 +63,24 @@ assert obj["exitCode"] == 1
 assert "boom-test" in obj["message"]
 assert obj["timedOut"] is False
 
-# 4. Timeout
+# 4. Runtime traceback is available as a separate field.
+r = run(["--json", tmp], content='local function inner() error("trace-test") end\nlocal function outer() inner() end\nouter()\n')
+obj = json.loads(r.stdout)
+check(obj, "script-error")
+assert "trace-test" in obj["traceback"]
+assert "function inner" in obj["traceback"]
+assert "function outer" in obj["traceback"]
+
+# 5. Timeout
 r = run(["--json", "--timeout", "0.1", tmp], content='while true do end\n')
+
 obj = json.loads(r.stdout)
 check(obj)
 assert obj["ok"] is False
 assert obj["timedOut"] is True, f"expected timedOut=True, got {obj}"
 assert obj["exitCode"] == 1
 
-# 5. durationMs is a non-negative integer
+# 6. durationMs is a non-negative integer
 assert isinstance(obj["durationMs"], int) and obj["durationMs"] >= 0
 
 print("json-schema-ok")

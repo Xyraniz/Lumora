@@ -124,6 +124,7 @@ Con `--json`, Lumora escribe siempre un único objeto JSON plano en stdout, sin 
   "stdout": "hello-world\n",
   "stderr": "",
   "message": "",
+  "traceback": "",
   "exitCode": 0,
   "durationMs": 12,
   "timedOut": false,
@@ -138,6 +139,7 @@ Con `--json`, Lumora escribe siempre un único objeto JSON plano en stdout, sin 
 | `stdout` | string | Salida estándar íntegra del script, como texto plano (nunca JSON anidado). |
 | `stderr` | string | Salida de error íntegra del script. |
 | `message` | string | Mensaje legible del fallo; vacío en éxito. |
+| `traceback` | string | Diagnóstico completo emitido por Luau, incluida la cadena de llamadas; vacío cuando no hay error. |
 | `exitCode` | int | Código de salida del proceso: `0` (éxito), `1` (error de script/timeout), `2` (error de carga o invocación). |
 | `durationMs` | int | Duración de la ejecución en milisegundos, redondeada. |
 | `timedOut` | bool | `true` si la ejecución se interrumpió por `--timeout`. |
@@ -170,6 +172,9 @@ La tabla siguiente resume la API cubierta por el prelude actual. La compatibilid
 | Tipos de datos | `typeof`, `Vector2`, `Vector3`, `UDim`, `UDim2`, `CFrame`, `Color3`, `BrickColor`, `Ray`, `RaycastParams`, `NumberRange`, `NumberSequence`, `ColorSequence`, `Font`, `Rect`, `Path2D` y `TweenInfo`. |
 | Scheduling | `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.wait`, además de los aliases globales habituales. |
 | Funciones de entorno | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv` y una capa de compatibilidad de executor (stubs seguros). |
+| Capacidades host seguras | `setclipboard`/`getclipboard` en memoria, `getcallstack`, `lumora.capabilities()` y namespace `lumora` para inspección reproducible. No acceden al portapapeles del sistema ni a Roblox. |
+| Filesystem de pruebas | `writefile`, `readfile`, `appendfile`, `isfile`, `isfolder`, `makefolder`, `delfile`, `delfolder`, `listfiles` y `loadfile` sobre un filesystem efímero en memoria. |
+| JSON | `HttpService:JSONEncode`, `HttpService:JSONDecode`, `json.encode` y `json.decode`, con objetos deterministas y errores de ciclos/profundidad. |
 | Aleatoriedad | `Random.new(seed)`, `NextInteger`, `NextNumber`, `NextUnitVector` y `Clone`, con estado PCG32 determinista. |
 | Biblioteca Luau | Biblioteca estándar, `bit32`, `string.pack/unpack`, `buffer`, `utf8` y sintaxis moderna del compilador. |
 
@@ -181,8 +186,9 @@ La implementación se mantiene en un prelude aislado dentro de `src/prelude.cpp`
 | --- | --- |
 | `src/main.cpp` | Parseo de CLI, orquestación de la ejecución (fork/exec, timeout a nivel de proceso) y ensamblado del resultado JSON. |
 | `src/prelude.cpp` | Prelude Roblox headless embebido (Lua) y closures nativas en C (`loadstring`, `type`, `typeof`, `iscclosure`, etc.) con registro de globals. |
-| `src/runtime.cpp` | Utilidades de ejecución: lectura de archivos, paso de argumentos, timeout cooperativo, modo `--sandbox` y `runScript`. |
-| `src/json.cpp` | Escapado de strings para la salida JSON. |
+| `src/runtime.cpp` | Utilidades de ejecución: lectura de archivos, paso de argumentos, timeout cooperativo, modo `--sandbox`, diagnóstico de errores y `runScript`. |
+| `src/json.cpp` | Escapado de strings, codec JSON de `HttpService`/`json` y validación de tipos/estructuras. |
+| `src/host_api.cpp` | Capacidades host locales: clipboard en memoria, stack inspection y metadatos de capacidades. |
 | `src/lumora.h` | Declaraciones compartidas entre los módulos de C++. |
 | `vendor/luau` | Fuentes oficiales vendorizados de Luau, incluyendo VM, compilador y biblioteca común. |
 | `tests/` | Smoke tests, contratos de CLI, sintaxis moderna, API Roblox, jerarquía, señales y scheduling. |
@@ -220,7 +226,7 @@ El equivalente directo es:
 ctest --test-dir build --output-on-failure
 ```
 
-Las pruebas cubren argumentos y stdout, `--json`, timeouts, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta y baja de hijos, atributos, enumeraciones, fidelidad de tipos de datos (Vector2/3, CFrame, Color3, UDim2), herencia de clases con `IsA`, destrucción recursiva, llamadas con `:`, scheduling, cancelación básica, modo `--sandbox` y validación del esquema JSON con un parser real.
+Las pruebas cubren argumentos y stdout, `--json`, timeouts, trazas de llamadas, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta y baja de hijos, atributos, enumeraciones, fidelidad de tipos de datos (Vector2/3, CFrame, Color3, UDim2), herencia de clases con `IsA`, destrucción recursiva, llamadas con `:`, señales de propiedades, scheduling, cancelación básica, capacidades host en memoria, codec JSON, modo `--sandbox` y validación del esquema JSON con un parser real.
 
 ## Integración con otras herramientas
 
@@ -229,6 +235,8 @@ Lumora es un proyecto independiente y no pertenece a ningún generador de códig
 ## Modelo de seguridad
 
 Lumora ejecuta c\u00f3digo Luau con acceso a la biblioteca est\u00e1ndar completa y, por defecto, a globals adicionales como `loadstring` y la capa de compatibilidad de executor. **Lumora no es un sandbox de seguridad.** Est\u00e1 dise\u00f1ado para ejecutar scripts sobre los que se tiene control o confianza razonable dentro de un pipeline de CI o un flujo de validaci\u00f3n local. Para ejecutar c\u00f3digo no confiable o de origen desconocido, se debe usar un contenedor externo (Docker, namespaces de Linux, VM, etc.) que a\u00edsla el sistema de archivos, la red y los procesos.
+
+Las funciones `setclipboard`/`getclipboard` usan únicamente una cadena en memoria del proceso. Del mismo modo, `writefile` y sus funciones relacionadas operan sobre un filesystem efímero en memoria; ninguna de estas APIs lee o modifica el sistema de archivos real. `getcallstack` y `lumora.capabilities()` solo exponen metadatos locales de diagnóstico. Las funciones de hook de executor siguen siendo stubs de compatibilidad y no alteran funciones ni metatables.
 
 ### Modo `--sandbox`
 

@@ -16,6 +16,7 @@ add_executable(lumora
     src/prelude.cpp
     src/runtime.cpp
     src/json.cpp
+    src/host_api.cpp
 )
 target_link_libraries(lumora PRIVATE Luau.Compiler Luau.VM Luau.Common)
 target_include_directories(lumora PRIVATE vendor/luau/VM/include vendor/luau/Compiler/include src)
@@ -44,4 +45,5 @@ if(BUILD_TESTING)
     add_test(NAME properties_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/properties_contract.lua)
     add_test(NAME events_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/events_contract.lua)
     add_test(NAME negative_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/negative_contract.lua)
+    add_test(NAME host_api_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/host_api_contract.lua)
 endif()

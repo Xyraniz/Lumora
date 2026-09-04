@@ -131,6 +131,11 @@ local function removeChild(parent, child)
 end
 instance_mt.__index = function(self, key)
     if key == "Parent" then return rawget(self, "_parent") end
+    local properties = rawget(self, "_properties")
+    if properties then
+        local value = rawget(properties, key)
+        if value ~= nil then return value end
+    end
     if key == "GetChildren" then return function(obj) if obj == nil then error("Expected ':' not '.' calling member function GetChildren", 0) end return obj._children end end
     if key == "FindFirstChild" then return function(obj, name) for _, c in ipairs(obj._children) do if c.Name == name then return c end end return nil end end
     if key == "WaitForChild" then return function(obj, name, timeout)
@@ -179,14 +184,30 @@ instance_mt.__newindex = function(self, key, value)
             table.insert(value._children, self)
             value.ChildAdded:Fire(self)
         end
+        local signals = rawget(self, "_propSignals")
+        if signals and signals.Parent then signals.Parent:Fire(value) end
         return
     end
+    local properties = rawget(self, "_properties")
+    if properties and key:sub(1, 1) ~= "_" then
+        local old = rawget(properties, key)
+        rawset(properties, key, value)
+        local signals = rawget(self, "_propSignals")
+        if signals and old ~= value and signals[key] then signals[key]:Fire(value) end
+        return
+    end
+    local old = rawget(self, key)
     rawset(self, key, value)
+    local signals = rawget(self, "_propSignals")
+    if signals and old ~= value and signals[key] then signals[key]:Fire(value) end
 end
 
 Instance = {}
 function Instance.new(className, parent)
-    local o = setmetatable({ ClassName=className, Name=className, __type="Instance", _children={}, _attributes={}, AttributeChanged=signal(), ChildAdded=signal(), ChildRemoved=signal() }, instance_mt)
+    local o = setmetatable({ __type="Instance", _properties={
+        ClassName=className, Name=className, AttributeChanged=signal(),
+        ChildAdded=signal(), ChildRemoved=signal()
+    }, _children={}, _attributes={} }, instance_mt)
     -- BindableEvent: expose Event signal and Fire method like real Roblox
     if className == "BindableEvent" then
         o.Event = signal()
@@ -501,18 +522,98 @@ if not HttpService then
     HttpService = game:GetService("HttpService")
 end
 
--- File system stubs
+-- File system compatibility layer.
+-- This is deliberately process-local and in-memory: it never touches the host
+-- filesystem. It is useful for scripts that persist small fixtures or modules
+-- while keeping Lumora suitable for reproducible tests.
 local _files = {}
-writefile = function(path, content) _files[path] = content end
-readfile = function(path) return _files[path] or "" end
-isfile = function(path) return _files[path] ~= nil end
-isfolder = function(path) return false end
-makefolder = function(path) end
-delfile = function(path) _files[path] = nil end
-delfolder = function(path) end
-listfiles = function(path) return {} end
-appendfile = function(path, content) _files[path] = (_files[path] or "") .. content end
-loadfile = function(path) return loadstring(readfile(path)) end
+local _folders = { [""] = true }
+local function _normalizePath(path)
+    assert(type(path) == "string", "path must be a string")
+    path = path:gsub("\\\\", "/"):gsub("^/+", ""):gsub("/+", "/")
+    path = path:gsub("^%./", "")
+    assert(path ~= "" and not path:find("%.%./", 1, true) and path ~= "..", "invalid path")
+    return path
+end
+local function _parentPath(path)
+    return path:match("^(.*)/[^/]+$") or ""
+end
+local function _ensureFolders(path)
+    local current = ""
+    for part in path:gmatch("[^/]+") do
+        current = current == "" and part or current .. "/" .. part
+        _folders[current] = true
+    end
+end
+local function _validateParent(path)
+    local parent = _parentPath(path)
+    if parent ~= "" and not _folders[parent] then
+        _ensureFolders(parent)
+    end
+end
+writefile = function(path, content)
+    path = _normalizePath(path); _validateParent(path)
+    _files[path] = tostring(content or "")
+end
+readfile = function(path)
+    path = _normalizePath(path)
+    assert(_files[path] ~= nil, "file does not exist: " .. path)
+    return _files[path]
+end
+isfile = function(path)
+    local ok, normalized = pcall(_normalizePath, path)
+    return ok and _files[normalized] ~= nil
+end
+isfolder = function(path)
+    local ok, normalized = pcall(_normalizePath, path)
+    return ok and _folders[normalized] == true
+end
+makefolder = function(path)
+    path = _normalizePath(path); _ensureFolders(path)
+end
+delfile = function(path)
+    path = _normalizePath(path); _files[path] = nil
+end
+delfolder = function(path)
+    path = _normalizePath(path)
+    for file in pairs(_files) do
+        if file == path or file:sub(1, #path + 1) == path .. "/" then _files[file] = nil end
+    end
+    for folder in pairs(_folders) do
+        if folder == path or folder:sub(1, #path + 1) == path .. "/" then _folders[folder] = nil end
+    end
+end
+listfiles = function(path)
+    local normalized = ""
+    if path and path ~= "" then normalized = _normalizePath(path) end
+    local prefix = normalized == "" and "" or normalized .. "/"
+    local result, seen = {}, {}
+    local function add(value)
+        if not seen[value] then seen[value] = true; table.insert(result, value) end
+    end
+    for file in pairs(_files) do
+        if file:sub(1, #prefix) == prefix then
+            local rest = file:sub(#prefix + 1)
+            if rest ~= "" and not rest:find("/", 1, true) then add(file) end
+        end
+    end
+    for folder in pairs(_folders) do
+        if folder ~= "" and folder:sub(1, #prefix) == prefix then
+            local rest = folder:sub(#prefix + 1)
+            if rest ~= "" and not rest:find("/", 1, true) then add(folder) end
+        end
+    end
+    table.sort(result)
+    return result
+end
+appendfile = function(path, content)
+    path = _normalizePath(path); _validateParent(path)
+    _files[path] = (_files[path] or "") .. tostring(content or "")
+end
+loadfile = function(path)
+    path = _normalizePath(path)
+    return loadstring(readfile(path), "@" .. path)
+end
 
 -- getconnections: return empty list
 getconnections = function(signal) return {} end
@@ -979,10 +1080,10 @@ instance_mt.__index = function(self, key)
     end
     if key == "GetPropertyChangedSignal" then
         return function(obj, prop)
-            local sig = signal()
+            assert(type(prop) == "string", "property name must be a string")
             obj._propSignals = obj._propSignals or {}
-            obj._propSignals[prop] = sig
-            return sig
+            if not obj._propSignals[prop] then obj._propSignals[prop] = signal() end
+            return obj._propSignals[prop]
         end
     end
     if key == "Raycast" then
