@@ -180,6 +180,10 @@ La tabla siguiente resume la API cubierta por el prelude actual. La compatibilid
 
 La implementación se mantiene en un prelude aislado dentro de `src/prelude.cpp` (con closures nativas en C) y utilidades de ejecución en `src/runtime.cpp`. Esta decisión permite ampliar la superficie de compatibilidad sin modificar la VM vendorizada ni acoplarla a un cliente gráfico. La paridad exacta con una versión concreta de Roblox debe comprobarse mediante vectores dorados de esa versión; Lumora prioriza la compatibilidad observable que necesitan sus tests y pipelines.
 
+### Simulación de jugadores para pruebas ESP
+
+Para validar lógica visual de forma reproducible, el prelude expone `lumora.simulatePlayers(specs)`. Crea jugadores y personajes sintéticos con `Head` y `HumanoidRootPart`, y dispara `Players.PlayerAdded`; `lumora.resetSimulatedPlayers()` limpia ese estado. `Highlight`, `BillboardGui` y `Drawing` son objetos observables headless: permiten afirmar que un ESP se crea, apunta al personaje correcto y queda habilitado, pero no dibujan ni interactúan con un cliente real. El contrato ejecutable está en `tests/simulated_players_esp.lua`.
+
 ## Arquitectura del repositorio
 
 | Ruta | Responsabilidad |

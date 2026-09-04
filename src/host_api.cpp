@@ -103,7 +103,12 @@ void registerHostGlobals(lua_State* L)
     registerFunction(L, LUA_GLOBALSINDEX, "getclipboard", getClipboard);
     registerFunction(L, LUA_GLOBALSINDEX, "getcallstack", getCallStack);
 
-    lua_newtable(L);
+    lua_getglobal(L, "lumora");
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        lua_newtable(L);
+    }
     const int api = lua_gettop(L);
     setStringField(L, api, "version", "0.3.0");
     registerFunction(L, api, "setClipboard", setClipboard);

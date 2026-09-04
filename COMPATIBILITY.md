@@ -41,6 +41,15 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `GetPropertyChangedSignal(name)` | ✅ | Señal reutilizable; se dispara cuando cambia la propiedad observada. |
 | `ChildAdded` / `ChildRemoved` | ✅ | Se disparan al reparentear y destruir. |
 
+## Simulación headless de jugadores
+
+| API | Estado | Notas |
+| --- | --- | --- |
+| `lumora.simulatePlayers(specs)` | ✅ | Agrega jugadores locales deterministas con `Name`, `DisplayName`, `UserId`, `Team`, `Character`, `Head` y `HumanoidRootPart`; dispara `Players.PlayerAdded`. No conecta con Roblox. |
+| `lumora.resetSimulatedPlayers()` | ✅ | Elimina los jugadores simulados y conserva `Players.LocalPlayer`; dispara `Players.PlayerRemoving`. |
+| `Player.CharacterAdded` / `CharacterRemoving` | ✅ | Señales disponibles en jugadores simulados para probar ciclos de respawn. |
+| `Highlight` / `BillboardGui` | 🟡 | Instancias headless con propiedades observables; no renderizan. Son suficientes para validar que un ESP crea, enlaza y habilita sus marcadores. |
+
 ## Tipos de datos
 
 | API | Estado | Notas |

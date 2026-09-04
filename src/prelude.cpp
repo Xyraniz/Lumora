@@ -1543,6 +1543,72 @@ do
     players.PlayerRemoving = players._signals.PlayerRemoving
     function players:GetPlayers() return players._playerList or {} end
     function players:GetAllPlayers() return players:GetPlayers() end
+
+    -- Deterministic local player simulation for headless compatibility tests.
+    -- This never connects to Roblox or mutates an external game session.
+    lumora = lumora or {}
+    local function makeSimCharacter(player, position)
+        local character = Instance.new("Model")
+        character.Name = player.Name .. "Character"
+        local root = Instance.new("Part")
+        root.Name = "HumanoidRootPart"
+        root.Size = Vector3.new(2, 2, 1)
+        root.Position = position or Vector3.new(0, 5, 0)
+        root.CFrame = CFrame.new(root.Position)
+        root.Parent = character
+        local head = Instance.new("Part")
+        head.Name = "Head"
+        head.Size = Vector3.new(2, 1, 1)
+        head.Position = (position or Vector3.new(0, 5, 0)) + Vector3.new(0, 2, 0)
+        head.CFrame = CFrame.new(head.Position)
+        head.Parent = character
+        local humanoid = _makeHumanoid and _makeHumanoid() or Instance.new("Humanoid")
+        humanoid.Name = "Humanoid"
+        humanoid.Parent = character
+        character.Parent = player
+        return character
+    end
+
+    function lumora.simulatePlayers(specs)
+        specs = specs or {}
+        local list = players._playerList or { players.LocalPlayer }
+        for index, spec in ipairs(specs) do
+            spec = spec or {}
+            local simulated = Instance.new("Player")
+            simulated.Name = spec.Name or ("SimPlayer" .. index)
+            simulated.DisplayName = spec.DisplayName or simulated.Name
+            simulated.UserId = spec.UserId or (90000000 + index)
+            simulated.Team = spec.Team
+            simulated.Backpack = Instance.new("Backpack", simulated)
+            simulated.PlayerGui = Instance.new("PlayerGui", simulated)
+            simulated.PlayerScripts = Instance.new("PlayerScripts", simulated)
+            simulated._signals = { CharacterAdded = signal(), CharacterRemoving = signal(), CharacterAppearanceLoaded = signal() }
+            simulated.CharacterAdded = simulated._signals.CharacterAdded
+            simulated.CharacterRemoving = simulated._signals.CharacterRemoving
+            simulated.CharacterAppearanceLoaded = simulated._signals.CharacterAppearanceLoaded
+            function simulated:GetMouse()
+                return { Hit = CFrame.new(0,0,0), X = 0, Y = 0, ViewportPoint = Vector3.new(0,0,0), Target = nil,
+                    Origin = Vector3.new(0,0,0), UnitRay = Ray.new(Vector3.new(0,0,0), Vector3.new(0,0,-1)) }
+            end
+            simulated.Character = makeSimCharacter(simulated, spec.Position or Vector3.new(index * 6, 5, 0))
+            table.insert(list, simulated)
+            players._playerList = list
+            players.PlayerAdded:Fire(simulated)
+        end
+        players._playerList = list
+        return list
+    end
+
+    function lumora.resetSimulatedPlayers()
+        local keep = players.LocalPlayer
+        for _, player in ipairs(players._playerList or {}) do
+            if player ~= keep then
+                players.PlayerRemoving:Fire(player)
+                player:Destroy()
+            end
+        end
+        players._playerList = { keep }
+    end
     function players:GetPlayerFromCharacter(char)
         if not char then return nil end
         for _, p in ipairs(players:GetPlayers()) do
