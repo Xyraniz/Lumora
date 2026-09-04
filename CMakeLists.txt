@@ -33,17 +33,23 @@ add_custom_command(TARGET lumora POST_BUILD
 
 include(CTest)
 if(BUILD_TESTING)
-    add_test(NAME smoke COMMAND ${CMAKE_SOURCE_DIR}/tests/smoke.sh $<TARGET_FILE:lumora>)
     add_test(NAME roblox_api COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/roblox_api.lua)
     add_test(NAME roblox_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/roblox_contract.lua)
-    add_test(NAME cli_flags COMMAND ${CMAKE_SOURCE_DIR}/tests/cli_flags.sh $<TARGET_FILE:lumora>)
-    add_test(NAME cli_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/cli_contract.sh $<TARGET_FILE:lumora>)
     add_test(NAME luau_modern COMMAND $<TARGET_FILE:lumora> --no-roblox ${CMAKE_SOURCE_DIR}/tests/luau_modern.lua)
     add_test(NAME datatypes_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/datatypes_contract.lua)
-    add_test(NAME sandbox_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/sandbox_contract.sh $<TARGET_FILE:lumora>)
-    add_test(NAME json_schema COMMAND ${CMAKE_SOURCE_DIR}/tests/json_schema.sh $<TARGET_FILE:lumora>)
     add_test(NAME properties_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/properties_contract.lua)
     add_test(NAME events_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/events_contract.lua)
     add_test(NAME negative_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/negative_contract.lua)
     add_test(NAME host_api_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/host_api_contract.lua)
+
+    # These contracts are POSIX shell programs. Register them only where the
+    # test runner can execute them; otherwise CTest reports misleading
+    # BAD_COMMAND failures before any Lumora code is run.
+    if(UNIX)
+        add_test(NAME smoke COMMAND ${CMAKE_SOURCE_DIR}/tests/smoke.sh $<TARGET_FILE:lumora>)
+        add_test(NAME cli_flags COMMAND ${CMAKE_SOURCE_DIR}/tests/cli_flags.sh $<TARGET_FILE:lumora>)
+        add_test(NAME cli_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/cli_contract.sh $<TARGET_FILE:lumora>)
+        add_test(NAME sandbox_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/sandbox_contract.sh $<TARGET_FILE:lumora>)
+        add_test(NAME json_schema COMMAND ${CMAKE_SOURCE_DIR}/tests/json_schema.sh $<TARGET_FILE:lumora>)
+    endif()
 endif()
