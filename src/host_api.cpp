@@ -3,20 +3,64 @@
 #include "lumora.h"
 
 #include <string>
+#include <cstdio>
+#include <cstdlib>
+#include <array>
 
 namespace
 {
 std::string g_clipboard;
 
+bool writeSystemClipboard(const std::string& text)
+{
+    if (!std::getenv("LUMORA_SYSTEM_CLIPBOARD")) return false;
+    if (!std::getenv("DISPLAY") && !std::getenv("WAYLAND_DISPLAY")) return false;
+    const std::array<const char*, 3> commands = {{"timeout 1s wl-copy 2>/dev/null", "timeout 1s xclip -selection clipboard 2>/dev/null", "timeout 1s xsel --clipboard --input 2>/dev/null"}};
+    for (const char* command : commands)
+    {
+        FILE* pipe = popen(command, "w");
+        if (!pipe) continue;
+        const size_t written = fwrite(text.data(), 1, text.size(), pipe);
+        const int status = pclose(pipe);
+        if (written == text.size() && status == 0) return true;
+    }
+    return false;
+}
+
+bool readSystemClipboard(std::string& output)
+{
+    if (!std::getenv("LUMORA_SYSTEM_CLIPBOARD")) return false;
+    if (!std::getenv("DISPLAY") && !std::getenv("WAYLAND_DISPLAY")) return false;
+    const std::array<const char*, 3> commands = {{"timeout 1s wl-paste --no-newline 2>/dev/null", "timeout 1s xclip -selection clipboard -o 2>/dev/null", "timeout 1s xsel --clipboard --output 2>/dev/null"}};
+    for (const char* command : commands)
+    {
+        FILE* pipe = popen(command, "r");
+        if (!pipe) continue;
+        std::string value;
+        char buffer[4096];
+        while (fgets(buffer, sizeof(buffer), pipe)) value += buffer;
+        const int status = pclose(pipe);
+        if (status == 0)
+        {
+            output = std::move(value);
+            return true;
+        }
+    }
+    return false;
+}
+
 int setClipboard(lua_State* L)
 {
     const char* text = luaL_checkstring(L, 1);
     g_clipboard = text ? text : "";
+    writeSystemClipboard(g_clipboard);
     return 0;
 }
 
 int getClipboard(lua_State* L)
 {
+    std::string value;
+    if (readSystemClipboard(value)) g_clipboard = std::move(value);
     lua_pushlstring(L, g_clipboard.data(), g_clipboard.size());
     return 1;
 }
@@ -39,7 +83,10 @@ int capabilities(lua_State* L)
     const int table = lua_gettop(L);
     setStringField(L, table, "runtime", "Lumora");
     setStringField(L, table, "version", "0.3.0");
+    std::string ignored;
+    const bool systemClipboard = readSystemClipboard(ignored);
     setStringField(L, table, "clipboard", "memory");
+    setBooleanField(L, table, "systemClipboardAvailable", systemClipboard);
     setStringField(L, table, "filesystem", "memory");
     setStringField(L, table, "http", "stub");
     setStringField(L, table, "rendering", "headless");

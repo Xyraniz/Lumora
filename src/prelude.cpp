@@ -507,11 +507,13 @@ gethui = function() return game:GetService("CoreGui") end
 protectgui = function(gui) end
 syn = syn or {}
 syn.protect_gui = function(gui) end
-syn.request = syn.request or function() return {StatusCode=200, Body="", Headers={}} end
+syn.request = syn.request or function()
+    error("syn.request is unavailable: Lumora has no network transport")
+end
 
--- request / http.request: stub HTTP
+-- request / http.request: fail loudly rather than returning a false 200.
 local function _stubRequest(opts)
-    return { StatusCode = 200, Body = "", Headers = {}, Success = true }
+    error("HTTP requests are unavailable: Lumora has no network transport")
 end
 request = _stubRequest
 http = http or {}
@@ -614,6 +616,15 @@ loadfile = function(path)
     path = _normalizePath(path)
     return loadstring(readfile(path), "@" .. path)
 end
+
+-- Resolve a virtual filesystem asset without pretending it is uploaded to
+-- Roblox. The URI is stable and can be inspected by headless tests.
+getcustomasset = function(path)
+    path = _normalizePath(path)
+    assert(_files[path] ~= nil, "asset does not exist: " .. path)
+    return "rbxasset://lumora/" .. path
+end
+getsynasset = getcustomasset
 
 -- getconnections: return empty list
 getconnections = function(signal) return {} end
@@ -1693,13 +1704,20 @@ end
 do
     local ts = game:GetService("TweenService")
     function ts:Create(obj, tweenInfo, properties)
+        assert(typeof(obj) == "Instance" and type(properties) == "table", "TweenService:Create expects an Instance and property table")
         local tween = setmetatable({ _obj = obj, _info = tweenInfo, _props = properties,
-            PlaybackState = "Completed", __type = "Tween" }, {
-            __index = {
-                Play = function(self) end,
-                Pause = function(self) end,
-                Cancel = function(self) end,
-                Destroy = function(self) end
+            PlaybackState = Enum.PlaybackState.Begin.__type and Enum.PlaybackState.Begin or "Begin",
+            Completed = signal(), __type = "Tween" }, {
+                __index = {
+                Play = function(self)
+                    self.PlaybackState = Enum.PlaybackState.Playing
+                    for key, value in pairs(self._props) do self._obj[key] = value end
+                    self.PlaybackState = Enum.PlaybackState.Completed
+                    self.Completed:Fire(self.PlaybackState)
+                end,
+                Pause = function(self) self.PlaybackState = Enum.PlaybackState.Paused end,
+                Cancel = function(self) self.PlaybackState = Enum.PlaybackState.Cancelled end,
+                Destroy = function(self) self.Completed:DisconnectAll(); self.PlaybackState = Enum.PlaybackState.Cancelled end
             }
         })
         return tween
@@ -1709,14 +1727,16 @@ end
 -- HttpService
 do
     local hs = game:GetService("HttpService")
-    function hs:JSONEncode(tbl) return "{}" end
-    function hs:JSONDecode(str) return {} end
+    -- JSONEncode/JSONDecode are replaced by the native codec after the
+    -- prelude is installed; these fallbacks are intentionally not lossy.
     function hs:GenerateGUID(wrapInCurlyBraces)
-        local guid = "00000000-0000-0000-0000-000000000000"
+        local guid = string.format("%08x-%04x-%04x-%04x-%012x", math.random(0, 0xffffffff), math.random(0, 0xffff), math.random(0, 0xffff), math.random(0, 0xffff), math.random(0, 0xffffffffffff))
         if wrapInCurlyBraces == false then return guid end
         return "{" .. guid .. "}"
     end
-    function hs:UrlEncode(str) return str or "" end
+    function hs:UrlEncode(str)
+        return tostring(str or ""):gsub("([^%w%-_%.~])", function(c) return string.format("%%%02X", string.byte(c)) end)
+    end
 end
 
 -- MarketplaceService
@@ -1771,14 +1791,26 @@ do
     cam.Parent = ws
 
     function cam:WorldToViewportPoint(pos)
-        return Vector3.new(960, 540, 50), true
+        local localPos = self.CFrame:PointToObjectSpace(pos)
+        local depth = -localPos.Z
+        if depth <= 0 then return Vector3.new(0, 0, depth), false end
+        local aspect = self.ViewportSize.X / math.max(self.ViewportSize.Y, 1)
+        local scale = math.tan(math.rad(self.FieldOfView) / 2)
+        local x = self.ViewportSize.X * 0.5 + (localPos.X / (depth * scale * aspect)) * self.ViewportSize.X * 0.5
+        local y = self.ViewportSize.Y * 0.5 - (localPos.Y / (depth * scale)) * self.ViewportSize.Y * 0.5
+        local visible = x >= 0 and x <= self.ViewportSize.X and y >= 0 and y <= self.ViewportSize.Y
+        return Vector3.new(x, y, depth), visible
     end
     function cam:ViewportPointToRay(x, y, depth)
-        return Ray.new(Vector3.new(0,0,0), Vector3.new(0,0,-1))
+        depth = depth or 0
+        local aspect = self.ViewportSize.X / math.max(self.ViewportSize.Y, 1)
+        local scale = math.tan(math.rad(self.FieldOfView) / 2)
+        local nx = ((x - self.ViewportSize.X * 0.5) / (self.ViewportSize.X * 0.5)) * scale * aspect
+        local ny = -((y - self.ViewportSize.Y * 0.5) / (self.ViewportSize.Y * 0.5)) * scale
+        local direction = (self.CFrame:VectorToWorldSpace(Vector3.new(nx, ny, -1))).Unit
+        return Ray.new(self.CFrame.Position + direction * depth, direction)
     end
-    function cam:ScreenPointToRay(x, y, depth)
-        return Ray.new(Vector3.new(0,0,0), Vector3.new(0,0,-1))
-    end
+    function cam:ScreenPointToRay(x, y, depth) return self:ViewportPointToRay(x, y, depth) end
     function cam:GetPartsObscuringTarget(targets, ignoreList) return {} end
     function cam:Raycast(origin, direction, params) return nil end
 end
@@ -1786,10 +1818,17 @@ end
 -- VirtualInputManager / VirtualUser
 do
     local vi = game:GetService("VirtualInputManager")
-    function vi:SendKeyEvent(keyCode, key, isDown, sync) end
-    function vi:SendMouseButtonEvent(x, y, button, isDown, sync) end
-    function vi:SendMouseMoveEvent(x, y, sync) end
-    function vi:SendMouseWheelEvent(x, y, scroll, sync) end
+    vi.InputBegan = signal(); vi.InputChanged = signal(); vi.InputEnded = signal()
+    function vi:SendKeyEvent(keyCode, key, isDown, sync)
+        local input = {KeyCode=keyCode, UserInputType=Enum.UserInputType.Keyboard, State=isDown and "Begin" or "End"}
+        local event = isDown and self.InputBegan or self.InputEnded; event:Fire(input)
+    end
+    function vi:SendMouseButtonEvent(x, y, button, isDown, sync)
+        local input = {Position=Vector2.new(x,y), UserInputType=button, State=isDown and "Begin" or "End"}
+        local event = isDown and self.InputBegan or self.InputEnded; event:Fire(input)
+    end
+    function vi:SendMouseMoveEvent(x, y, sync) self.InputChanged:Fire({Position=Vector2.new(x,y), UserInputType=Enum.UserInputType.MouseMovement}) end
+    function vi:SendMouseWheelEvent(x, y, scroll, sync) self.InputChanged:Fire({Position=Vector2.new(x,y), Delta=Vector3.new(0,scroll,0), UserInputType=Enum.UserInputType.MouseWheel}) end
 
     local vu = game:GetService("VirtualUser")
     function vu:Button1Down(x, y, camera) end
@@ -1803,10 +1842,12 @@ end
 -- ContextActionService
 do
     local cas = game:GetService("ContextActionService")
-    function cas:BindAction(actionName, fn, createTouchButton, ...) end
-    function cas:UnbindAction(actionName) end
-    function cas:BindActionAtPriority(actionName, fn, createTouchButton, priority, ...) end
-    function cas:UnbindActionAtPriority(actionName, priority) end
+    cas._actions = {}
+    function cas:BindAction(actionName, fn, createTouchButton, ...) self._actions[actionName] = {Callback=fn, Inputs={...}}; return actionName end
+    function cas:UnbindAction(actionName) self._actions[actionName] = nil end
+    function cas:BindActionAtPriority(actionName, fn, createTouchButton, priority, ...) return self:BindAction(actionName, fn, createTouchButton, ...) end
+    function cas:UnbindActionAtPriority(actionName, priority) return self:UnbindAction(actionName) end
+    function cas:FireAction(actionName, state, input) local action = self._actions[actionName]; if not action then return nil end; return action.Callback(actionName, state, input) end
 end
 
 -- ScriptContext
@@ -1818,9 +1859,11 @@ end
 -- TeleportService
 do
     local ts = game:GetService("TeleportService")
-    function ts:Teleport(placeId, player, options, bindable) end
-    function ts:TeleportToPlaceInstance(placeId, jobId, player, ...) end
-    function ts:TeleportPartyAsync(placeId, players, options) return 0 end
+    ts.TeleportInitFailed = signal()
+    local function unavailable() error("TeleportService is unavailable: Lumora has no Roblox client") end
+    function ts:Teleport(placeId, player, options, bindable) unavailable() end
+    function ts:TeleportToPlaceInstance(placeId, jobId, player, ...) unavailable() end
+    function ts:TeleportPartyAsync(placeId, players, options) unavailable() end
 end
 
 -- SoundService
@@ -1829,8 +1872,11 @@ game:GetService("SoundService")
 -- Debris service
 do
     local debris = game:GetService("Debris")
-    function debris:AddItem(item, lifetime) end
-    function debris:SetLegacyMaxItems(maxItems) end
+    function debris:AddItem(item, lifetime)
+        assert(item and item.Destroy, "Debris:AddItem expects an Instance")
+        task.delay(math.max(0, lifetime or 0), function() if item.Parent then item:Destroy() end end)
+    end
+    function debris:SetLegacyMaxItems(maxItems) self.MaxItems = maxItems end
 end
 
 -- LocalizationService
@@ -1842,20 +1888,30 @@ end
 -- SetCoreGuiEnabled via StarterGui
 do
     local sg = game:GetService("StarterGui")
-    function sg:SetCoreGuiEnabled(gui, enabled) end
-    function sg:GetCoreGuiEnabled(gui) return true end
-    function sg:SetCore(name, value) end
-    function sg:GetCore(name) return nil end
+    sg._enabled = {}; sg._core = {}
+    function sg:SetCoreGuiEnabled(gui, enabled) self._enabled[gui] = not not enabled end
+    function sg:GetCoreGuiEnabled(gui) return self._enabled[gui] ~= false end
+    function sg:SetCore(name, value) self._core[name] = value end
+    function sg:GetCore(name) return self._core[name] end
 end
 
 -- CollectionService
 do
     local cs = game:GetService("CollectionService")
-    function cs:GetTagged(tag) return {} end
-    function cs:AddTag(instance, tag) end
-    function cs:RemoveTag(instance, tag) end
-    function cs:GetInstanceAddedSignal(tag) return signal() end
-    function cs:GetInstanceRemovedSignal(tag) return signal() end
+    cs._tags = {}; cs._added = {}; cs._removed = {}
+    local function bucket(tag) cs._tags[tag] = cs._tags[tag] or {}; return cs._tags[tag] end
+    function cs:GetTagged(tag) local out = {}; for instance in pairs(bucket(tag)) do table.insert(out, instance) end; return out end
+    function cs:AddTag(instance, tag)
+        assert(instance and tag, "CollectionService:AddTag expects instance and tag")
+        local b = bucket(tag); if b[instance] then return end; b[instance] = true
+        self:GetInstanceAddedSignal(tag):Fire(instance)
+    end
+    function cs:RemoveTag(instance, tag)
+        local b = bucket(tag); if not b[instance] then return end; b[instance] = nil
+        self:GetInstanceRemovedSignal(tag):Fire(instance)
+    end
+    function cs:GetInstanceAddedSignal(tag) self._added[tag] = self._added[tag] or signal(); return self._added[tag] end
+    function cs:GetInstanceRemovedSignal(tag) self._removed[tag] = self._removed[tag] or signal(); return self._removed[tag] end
 end
 
 -- Animator / Humanoid stubs (set on Character instances)

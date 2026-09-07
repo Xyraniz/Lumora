@@ -4,6 +4,15 @@ All notable changes to Lumora are documented in this file. The format is based o
 
 ## [Unreleased]
 
+### Added
+- Functional headless contracts for `TweenService`, `CollectionService`, camera projection/rays, virtual input, `ContextActionService`, `Debris`, `StarterGui`, and validated virtual assets through `getcustomasset`.
+- `tests/functional_apis_contract.lua`, covering state changes, signals, projection, asset validation, and explicit network failure.
+
+### Changed
+- HTTP/request and teleport APIs no longer return false successful responses; they fail explicitly because Lumora has no Roblox network/client transport.
+- `setclipboard`/`getclipboard` keep deterministic in-memory semantics by default and can opt into a bounded system clipboard backend with `LUMORA_SYSTEM_CLIPBOARD=1`.
+- Documentation now distinguishes implemented headless behavior from unavailable external capabilities.
+
 ## [0.3.0] — 2026
 
 ### Added

@@ -104,11 +104,11 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `newcclosure` / `clonefunction` | ✅ | |
 | `getfenv` / `setfenv` | ✅ | |
 | `getgenv` / `getrenv` | 🟡 | Devuelve una tabla compartida; sin aislamiento real de entornos. |
-| `setclipboard` / `getclipboard` | ✅ | Clipboard efímero en memoria del proceso; no usa el clipboard del sistema. Eliminado en `--sandbox`. |
+| `setclipboard` / `getclipboard` | ✅ | Clipboard en memoria por defecto; backend del sistema opt-in mediante `LUMORA_SYSTEM_CLIPBOARD=1`, con fallback seguro. Eliminado en `--sandbox`. |
 | `getcallstack` | ✅ | Devuelve frames serializables con fuente, línea, nombre y tipo. Eliminado en `--sandbox`. |
 | `lumora.capabilities()` | ✅ | Describe capacidades locales (`memory`, `stub`, `disabled`, `headless`). Eliminado en `--sandbox`. |
 | `loadstring` / `load` | ✅ | Compila Luau a bytecode y carga. Eliminado en `--sandbox`. |
-| Capa de executor (`hookfunction`, etc.) | 🟡 | Stubs seguros que no hacen nada; presentes para compatibilidad. Eliminados en `--sandbox`. |
+| Capa de executor (`hookfunction`, etc.) | 🟡 | Solo wrappers/inspección segura; hooks mutantes no están disponibles y no reportan mutación. Eliminados en `--sandbox`. |
 
 ## Filesystem y serialización
 
@@ -120,6 +120,18 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `loadfile` | ✅ | Compila desde el filesystem virtual y usa el nombre lógico como chunk name. |
 | `HttpService:JSONEncode` / `JSONDecode` | ✅ | Codec JSON nativo con arrays/objetos, escapes, límites de profundidad y detección de ciclos. |
 | `json.encode` / `json.decode` | ✅ | Alias sin estado del codec de `HttpService`. |
+
+## Servicios headless y capacidades externas
+
+| API | Estado | Notas |
+| --- | --- | --- |
+| `TweenService:Create` | ✅ | Aplica propiedades, mantiene `PlaybackState` y dispara `Completed`; no anima en tiempo real. |
+| `CollectionService` | ✅ | Tags, consultas y señales de alta/baja en memoria. |
+| `Camera:WorldToViewportPoint` / `ViewportPointToRay` | ✅ | Proyección perspectiva determinista basada en `CFrame`, FOV y viewport. |
+| `VirtualInputManager` / `ContextActionService` | ✅ | Eventos y acciones observables en memoria; no inyectan eventos al sistema operativo. |
+| `Debris:AddItem` / `StarterGui` | ✅ | Scheduler de destrucción y estado de CoreGui/Core funcionales en memoria. |
+| `request` / `HttpService` de red | 🔴 | No hay transporte de red; las llamadas producen un error explícito. JSON y `UrlEncode` sí son locales. |
+| `TeleportService` | 🔴 | No existe cliente Roblox; las llamadas producen un error explícito. |
 
 ## CLI y salida
 

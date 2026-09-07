@@ -29,7 +29,7 @@ Los runtimes independientes de Luau suelen enfocarse en programación general o 
 
 ## Características principales
 
-Lumora acepta archivos `.lua` y `.luau` directamente, conserva la biblioteca estándar de Luau y soporta sintaxis moderna del compilador. La capa Roblox incluye jerarquías de instancias, servicios, atributos, señales, enumeraciones, tipos de datos y un scheduler cooperativo reducido. Las funciones que dependen de un cliente, una ventana o una red real se mantienen como stubs seguros o comportamientos headless explícitos.
+Lumora acepta archivos `.lua` y `.luau` directamente, conserva la biblioteca estándar de Luau y soporta sintaxis moderna del compilador. La capa Roblox incluye jerarquías de instancias, servicios, atributos, señales, enumeraciones, tipos de datos y un scheduler cooperativo reducido. Las APIs headless mantienen estado, disparan eventos y aplican transformaciones cuando es posible; las capacidades externas que no existen en el proceso fallan explícitamente en vez de devolver un éxito vacío.
 
 La salida normal conserva el stdout del script. Con `--json`, Lumora devuelve un objeto estructurado con el resultado de la ejecución, stdout, stderr, error y código de salida, lo que permite consumirlo desde scripts de shell, runners de pruebas, pipelines de CI o herramientas escritas en otros lenguajes.
 
@@ -160,7 +160,7 @@ El directorio `examples/` contiene scripts listos para ejecutar que muestran las
 
 ## Superficie Roblox emulada
 
-La tabla siguiente resume la API cubierta por el prelude actual. La compatibilidad es deliberadamente **headless**: las operaciones sin equivalente local se representan con stubs, valores seguros o colecciones vacías en lugar de intentar conectarse a servicios externos.
+La tabla siguiente resume la API cubierta por el prelude actual. La compatibilidad es deliberadamente **headless**: las operaciones locales tienen lógica observable y las operaciones sin equivalente local producen un error explícito en lugar de fingir una respuesta de Roblox.
 
 | Área | Superficie disponible |
 | --- | --- |
@@ -172,7 +172,7 @@ La tabla siguiente resume la API cubierta por el prelude actual. La compatibilid
 | Tipos de datos | `typeof`, `Vector2`, `Vector3`, `UDim`, `UDim2`, `CFrame`, `Color3`, `BrickColor`, `Ray`, `RaycastParams`, `NumberRange`, `NumberSequence`, `ColorSequence`, `Font`, `Rect`, `Path2D` y `TweenInfo`. |
 | Scheduling | `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.wait`, además de los aliases globales habituales. |
 | Funciones de entorno | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv` y una capa de compatibilidad de executor (stubs seguros). |
-| Capacidades host seguras | `setclipboard`/`getclipboard` en memoria, `getcallstack`, `lumora.capabilities()` y namespace `lumora` para inspección reproducible. No acceden al portapapeles del sistema ni a Roblox. |
+| Capacidades host seguras | `setclipboard`/`getclipboard` en memoria por defecto; clipboard del sistema opt-in con `LUMORA_SYSTEM_CLIPBOARD=1`, además de `getcallstack` y `lumora.capabilities()`. No acceden a Roblox. |
 | Filesystem de pruebas | `writefile`, `readfile`, `appendfile`, `isfile`, `isfolder`, `makefolder`, `delfile`, `delfolder`, `listfiles` y `loadfile` sobre un filesystem efímero en memoria. |
 | JSON | `HttpService:JSONEncode`, `HttpService:JSONDecode`, `json.encode` y `json.decode`, con objetos deterministas y errores de ciclos/profundidad. |
 | Aleatoriedad | `Random.new(seed)`, `NextInteger`, `NextNumber`, `NextUnitVector` y `Clone`, con estado PCG32 determinista. |
@@ -240,7 +240,7 @@ Lumora es un proyecto independiente y no pertenece a ningún generador de códig
 
 Lumora ejecuta c\u00f3digo Luau con acceso a la biblioteca est\u00e1ndar completa y, por defecto, a globals adicionales como `loadstring` y la capa de compatibilidad de executor. **Lumora no es un sandbox de seguridad.** Est\u00e1 dise\u00f1ado para ejecutar scripts sobre los que se tiene control o confianza razonable dentro de un pipeline de CI o un flujo de validaci\u00f3n local. Para ejecutar c\u00f3digo no confiable o de origen desconocido, se debe usar un contenedor externo (Docker, namespaces de Linux, VM, etc.) que a\u00edsla el sistema de archivos, la red y los procesos.
 
-Las funciones `setclipboard`/`getclipboard` usan únicamente una cadena en memoria del proceso. Del mismo modo, `writefile` y sus funciones relacionadas operan sobre un filesystem efímero en memoria; ninguna de estas APIs lee o modifica el sistema de archivos real. `getcallstack` y `lumora.capabilities()` solo exponen metadatos locales de diagnóstico. Las funciones de hook de executor siguen siendo stubs de compatibilidad y no alteran funciones ni metatables.
+Las funciones `setclipboard`/`getclipboard` usan una cadena en memoria del proceso. Si se define `LUMORA_SYSTEM_CLIPBOARD=1`, intentan además usar `wl-copy`/`wl-paste`, `xclip` o `xsel`, con timeout y fallback a memoria. `writefile` y sus funciones relacionadas operan sobre un filesystem efímero en memoria; ninguna de estas APIs lee o modifica el sistema de archivos real. `getcallstack` y `lumora.capabilities()` solo exponen metadatos locales de diagnóstico. Las funciones de hook de executor siguen siendo stubs de compatibilidad y no alteran funciones ni metatables; las llamadas de red y teleport fallan explícitamente porque no hay transporte Roblox.
 
 ### Modo `--sandbox`
 
