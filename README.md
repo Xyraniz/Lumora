@@ -174,6 +174,8 @@ El punto de entrada recomendado es:
 
 La librería adjunta de UI también está integrada como `examples/attached_library.lua`. Se ejecuta completa en headless y en modo visual: crea su `CoreGui`, frames, labels, botones, sliders, colorpickers, conexiones de input, tweening, notificaciones y configuración. El contrato `attached_library_load` se ejecuta en CTest para evitar que futuras modificaciones vuelvan a romper su carga.
 
+El renderer visual usa ahora fuentes rasterizadas mediante SDL_ttf, transparencia alfa, rectángulos redondeados, métricas de texto deterministas y escalado `UDim2` sobre un viewport fijo de 1280×720. Esto mejora sustancialmente la lectura y proporción de la UI, pero no promete paridad píxel a píxel con Roblox: para eso serían necesarios el mismo rasterizador, las fuentes exactas, los atlas de imágenes y el compositor propietario de Roblox. Las imágenes `rbxassetid://` no se descargan ni se presentan como si fueran auténticas si no existe un asset local correspondiente.
+
 La escena incluye un piso con cuadrícula de perspectiva, muros de prueba, iluminación de color por jugador, etiquetas, cajas de ESP, líneas al centro de pantalla y selección de objetivo. El renderer ejecuta `RunService.Heartbeat` y `RunService.RenderStepped` en cada frame, despacha input a `UserInputService`, dibuja objetos `Drawing.Line` y respeta oclusión contra los muros. Al activar `F`, la cámara se orienta al jugador visible más cercano al centro; esto permite probar la lógica de selección sin apuntar a un servicio externo. La física deliberadamente se limita a movimiento de cámara, oclusión y posicionamiento determinista; no pretende reproducir el motor físico completo de Roblox.
 
 ## Superficie Roblox emulada

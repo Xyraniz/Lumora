@@ -4,6 +4,7 @@
 #include "lumora.h"
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -12,6 +13,7 @@
 #include <vector>
 
 namespace {
+TTF_Font* gFont=nullptr;
 struct V3 { float x, y, z; V3 operator+(V3 b) const { return {x+b.x,y+b.y,z+b.z}; } V3 operator-(V3 b) const { return {x-b.x,y-b.y,z-b.z}; } V3 operator*(float s) const { return {x*s,y*s,z*s}; } };
 float dot(V3 a, V3 b) { return a.x*b.x+a.y*b.y+a.z*b.z; }
 float length(V3 a) { return std::sqrt(dot(a,a)); }
@@ -39,11 +41,10 @@ bool hasHighlight(lua_State* L, int character) {
 }
 
 void drawText(SDL_Renderer* r, int x, int y, const std::string& text, SDL_Color c) {
-    // Compact 5x7 bitmap font; avoids a hidden font dependency while keeping labels real.
-    static const unsigned char glyphs[16][7]={{0}}; (void)glyphs;
-    SDL_SetRenderDrawColor(r,c.r,c.g,c.b,c.a); int cursor=x;
-    for (char ch:text) { if (ch==' ') {cursor+=5;continue;} SDL_Rect box{cursor,y,4,7}; SDL_RenderFillRect(r,&box); cursor+=6; }
+    if(!gFont){SDL_SetRenderDrawColor(r,c.r,c.g,c.b,c.a);SDL_Rect box{x,y,(int)text.size()*6,8};SDL_RenderFillRect(r,&box);return;}
+    SDL_Surface* s=TTF_RenderUTF8_Blended(gFont,text.c_str(),c);if(!s)return;SDL_Texture* t=SDL_CreateTextureFromSurface(r,s);SDL_Rect dst{x,y,s->w,s->h};SDL_FreeSurface(s);if(t){SDL_SetTextureBlendMode(t,SDL_BLENDMODE_BLEND);SDL_RenderCopy(r,t,nullptr,&dst);SDL_DestroyTexture(t);}
 }
+void roundedRect(SDL_Renderer* r,SDL_Rect rect,int radius,SDL_Color c){SDL_SetRenderDrawColor(r,c.r,c.g,c.b,c.a);radius=std::min(radius,std::min(rect.w,rect.h)/2);SDL_Rect mid{rect.x+radius,rect.y,rect.w-2*radius,rect.h};SDL_RenderFillRect(r,&mid);SDL_Rect side{rect.x,rect.y+radius,rect.w,rect.h-2*radius};SDL_RenderFillRect(r,&side);for(int y=-radius;y<=radius;y++)for(int x=-radius;x<=radius;x++)if(x*x+y*y<=radius*radius){SDL_RenderDrawPoint(r,rect.x+radius+x,rect.y+radius+y);SDL_RenderDrawPoint(r,rect.x+rect.w-radius-1+x,rect.y+radius+y);SDL_RenderDrawPoint(r,rect.x+radius+x,rect.y+rect.h-radius-1+y);SDL_RenderDrawPoint(r,rect.x+rect.w-radius-1+x,rect.y+rect.h-radius-1+y);}}
 SDL_Color colorOf(lua_State* L,int index,SDL_Color fallback) { if(!lua_istable(L,index))return fallback;float r=1,g=1,b=1;fieldNumber(L,index,"R",r);fieldNumber(L,index,"G",g);fieldNumber(L,index,"B",b);return {(Uint8)(r<=1?r*255:r),(Uint8)(g<=1?g*255:g),(Uint8)(b<=1?b*255:b),255}; }
 bool point2(lua_State* L,int index,int& x,int& y) { if(!lua_istable(L,index))return false;float fx=0,fy=0;fieldNumber(L,index,"X",fx);fieldNumber(L,index,"Y",fy);x=(int)fx;y=(int)fy;return true; }
 void line(SDL_Renderer* r,int x1,int y1,int x2,int y2,SDL_Color c);
@@ -56,7 +57,7 @@ void renderGuiNode(lua_State* L,SDL_Renderer* r,int node,float px,float py,float
     lua_getfield(L,node,"Position");int pos=lua_absindex(L,-1);float x=px,y=py;if(lua_istable(L,pos)){x=udim(L,pos,"X",pw,px);y=udim(L,pos,"Y",ph,py);}lua_pop(L,1);
     lua_getfield(L,node,"Size");int size=lua_absindex(L,-1);float w=numberField(L,node,"AbsoluteSizeX",120),h=numberField(L,node,"AbsoluteSizeY",30);if(lua_istable(L,size)){w=udim(L,size,"X",pw,w);h=udim(L,size,"Y",ph,h);}lua_pop(L,1);
     lua_getfield(L,node,"Visible");bool visible=lua_isnil(L,-1)||lua_toboolean(L,-1);lua_pop(L,1);if(!visible)return;
-    if(cls=="Frame"||cls=="TextButton"||cls=="TextBox"||cls=="ScrollingFrame"||cls=="ImageLabel"||cls=="ImageButton"){SDL_Color bg=propertyColor(L,node,"BackgroundColor3",{40,40,55,255});lua_getfield(L,node,"BackgroundTransparency");float tr=lua_isnumber(L,-1)?(float)lua_tonumber(L,-1):0;lua_pop(L,1);if(tr<1){SDL_SetRenderDrawColor(r,bg.r,bg.g,bg.b,(Uint8)(255*(1-tr)));SDL_Rect rect{(int)x,(int)y,std::max(1,(int)w),std::max(1,(int)h)};SDL_RenderFillRect(r,&rect);}}
+    if(cls=="Frame"||cls=="TextButton"||cls=="TextBox"||cls=="ScrollingFrame"||cls=="ImageLabel"||cls=="ImageButton"){SDL_Color bg=propertyColor(L,node,"BackgroundColor3",{40,40,55,255});lua_getfield(L,node,"BackgroundTransparency");float tr=lua_isnumber(L,-1)?(float)lua_tonumber(L,-1):0;lua_pop(L,1);if(tr<1){SDL_Rect rect{(int)x,(int)y,std::max(1,(int)w),std::max(1,(int)h)};roundedRect(r,rect,4,{bg.r,bg.g,bg.b,(Uint8)(255*(1-tr))});}lua_getfield(L,node,"UICorner");lua_pop(L,1);}
     if(cls=="TextLabel"||cls=="TextButton"||cls=="TextBox"||cls=="TextButton"){std::string text=fieldString(L,node,"Text");if(!text.empty()){SDL_Color tc=propertyColor(L,node,"TextColor3",{235,235,235,255});drawText(r,(int)x+4,(int)y+4,text,tc);}}
     lua_getfield(L,node,"_children");if(lua_istable(L,-1)){int list=lua_absindex(L,-1),n=(int)lua_objlen(L,list);for(int i=1;i<=n;i++){lua_rawgeti(L,list,i);if(lua_istable(L,-1))renderGuiNode(L,r,lua_absindex(L,-1),x,y,w,h);lua_pop(L,1);}}lua_pop(L,1);
 }
@@ -94,10 +95,12 @@ bool blocked(V3 a,V3 b) { V3 d=b-a; for(const Wall& w:kWalls){ if(std::abs(d.z)<
 int runVisual(const char* path,int argc,char** argv,bool sandbox) {
     (void)sandbox;
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS)!=0){std::fprintf(stderr,"SDL init failed: %s\n",SDL_GetError());return 2;}
+    if(TTF_Init()!=0){std::fprintf(stderr,"TTF init failed: %s\n",TTF_GetError());SDL_Quit();return 2;}
     SDL_Window* win=SDL_CreateWindow("Lumora Visual Lab",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,720,SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE);
     SDL_Renderer* renderer=win?SDL_CreateRenderer(win,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC):nullptr;
     if (win && !renderer) renderer=SDL_CreateRenderer(win,-1,SDL_RENDERER_SOFTWARE);
-    if(!win||!renderer){std::fprintf(stderr,"visual window failed: %s\n",SDL_GetError());if(renderer)SDL_DestroyRenderer(renderer);if(win)SDL_DestroyWindow(win);SDL_Quit();return 2;}
+    if(!win||!renderer){std::fprintf(stderr,"visual window failed: %s\n",SDL_GetError());if(renderer)SDL_DestroyRenderer(renderer);if(win)SDL_DestroyWindow(win);TTF_Quit();SDL_Quit();return 2;}
+    const char* fonts[]={"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf","/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"};for(const char* font:fonts){gFont=TTF_OpenFont(font,14);if(gFont)break;}
     lua_State* L=luaL_newstate();luaL_openlibs(L); if(!loadScript(L,path,argc,argv)){lua_close(L);SDL_DestroyRenderer(renderer);SDL_DestroyWindow(win);SDL_Quit();return 1;}
     Camera cam; bool running=true, capture=true, aim=false; Uint64 last=SDL_GetPerformanceCounter(); SDL_SetRelativeMouseMode(SDL_TRUE);
     while(running){ Uint64 now=SDL_GetPerformanceCounter(); float dt=(float)((now-last)/(double)SDL_GetPerformanceFrequency());last=now;dt=std::min(dt,.05f); SDL_Event e; const Uint8* keys=SDL_GetKeyboardState(nullptr);
@@ -117,5 +120,5 @@ int runVisual(const char* path,int argc,char** argv,bool sandbox) {
         SDL_SetRenderDrawColor(renderer,18,24,29,230);SDL_Rect panel{18,18,330,74};SDL_RenderFillRect(renderer,&panel);drawText(renderer,30,30,"LUMORA VISUAL LAB",{110,220,255,255});drawText(renderer,30,45,"WASD move | mouse look | F toggle aim",{230,230,230,255});drawText(renderer,30,60,aim?"AIM ASSIST: TARGETING":"ESP: HIGHLIGHTS ACTIVE",{255,190,80,255});if(bestIndex>=0&&aim)drawText(renderer,30,75,"locked: "+players[bestIndex].name,{255,100,90,255});
         SDL_RenderPresent(renderer);
     }
-    SDL_SetRelativeMouseMode(SDL_FALSE);lua_close(L);SDL_DestroyRenderer(renderer);SDL_DestroyWindow(win);SDL_Quit();return 0;
+    SDL_SetRelativeMouseMode(SDL_FALSE);lua_close(L);if(gFont){TTF_CloseFont(gFont);gFont=nullptr;}SDL_DestroyRenderer(renderer);SDL_DestroyWindow(win);TTF_Quit();SDL_Quit();return 0;
 }

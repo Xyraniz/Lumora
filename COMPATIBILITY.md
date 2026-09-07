@@ -147,6 +147,16 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `BillboardGui`/texto | 🟡 | Las etiquetas de jugador se renderizan como HUD nativo; el layout completo de Roblox aún no se reproduce. |
 | Física Roblox | 🔴 | El laboratorio usa movimiento de cámara, oclusión y posiciones deterministas; no intenta sustituir el motor físico completo de Roblox. |
 
+## Fidelidad de UI
+
+| Área | Estado | Notas |
+| --- | --- | --- |
+| Texto | ✅ | SDL_ttf con fuente local rasterizada y métrica real; no se dibuja como bloques. |
+| Alfa y esquinas | ✅ | Transparencia por píxel y `UICorner` aproximado mediante geometría nativa. |
+| Layout `UDim2` | ✅ | Se resuelven escalas y offsets contra el viewport visual de 1280×720. |
+| Assets `rbxassetid://` | 🔴 | No se inventan texturas: requieren un archivo local compatible; Roblox no ofrece esos assets al laboratorio. |
+| Paridad píxel a píxel | 🔴 | No es técnicamente garantizable fuera del compositor, fuentes, atlas y rasterizador de Roblox. |
+
 ## CLI y salida
 
 | API | Estado | Notas |
