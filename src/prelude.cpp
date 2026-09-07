@@ -638,7 +638,7 @@ drawing_mt.__index = drawing_mt
 function drawing_mt:Remove() self.Visible = false end
 function drawing_mt:Destroy() self.Visible = false end
 
-Drawing = {}
+Drawing = { _objects = {} }
 function Drawing.new(type)
     local obj = setmetatable({
         Type = type, Visible = false, Color = {R=255,G=255,B=255,A=255},
@@ -650,6 +650,7 @@ function Drawing.new(type)
         OutlineColor = {R=0,G=0,B=0,A=255}, Font = 0, ZIndex = 0,
         __type = "Drawing"
     }, drawing_mt)
+    table.insert(Drawing._objects, obj)
     return obj
 end
 Drawing.Fonts = { Plex = 0, Monospace = 1, System = 2, UI = 3 }

@@ -18,6 +18,8 @@ float length(V3 a) { return std::sqrt(dot(a,a)); }
 V3 norm(V3 a) { float n=length(a); return n > .001f ? a*(1.f/n) : V3{0,0,1}; }
 struct Target { std::string name; V3 pos; bool highlighted; };
 struct Camera { V3 pos{0,5,18}; float yaw=3.14159f, pitch=-0.12f; };
+struct Wall { float x,z,w,d,h; };
+const std::vector<Wall> kWalls{{-15.f,-10.f,3.f,14.f,5.f},{14.f,-3.f,3.f,15.f,5.f},{0.f,-24.f,24.f,2.f,5.f}};
 
 bool fieldNumber(lua_State* L, int index, const char* key, float& out) {
     index = lua_absindex(L,index); lua_getfield(L,index,key); if (!lua_isnumber(L,-1)) { lua_pop(L,1); return false; } out=(float)lua_tonumber(L,-1); lua_pop(L,1); return true;
@@ -42,6 +44,10 @@ void drawText(SDL_Renderer* r, int x, int y, const std::string& text, SDL_Color 
     SDL_SetRenderDrawColor(r,c.r,c.g,c.b,c.a); int cursor=x;
     for (char ch:text) { if (ch==' ') {cursor+=5;continue;} SDL_Rect box{cursor,y,4,7}; SDL_RenderFillRect(r,&box); cursor+=6; }
 }
+SDL_Color colorOf(lua_State* L,int index,SDL_Color fallback) { if(!lua_istable(L,index))return fallback;float r=1,g=1,b=1;fieldNumber(L,index,"R",r);fieldNumber(L,index,"G",g);fieldNumber(L,index,"B",b);return {(Uint8)(r<=1?r*255:r),(Uint8)(g<=1?g*255:g),(Uint8)(b<=1?b*255:b),255}; }
+bool point2(lua_State* L,int index,int& x,int& y) { if(!lua_istable(L,index))return false;float fx=0,fy=0;fieldNumber(L,index,"X",fx);fieldNumber(L,index,"Y",fy);x=(int)fx;y=(int)fy;return true; }
+void line(SDL_Renderer* r,int x1,int y1,int x2,int y2,SDL_Color c);
+void renderDrawings(lua_State* L,SDL_Renderer* r) { lua_getglobal(L,"Drawing");lua_getfield(L,-1,"_objects");if(!lua_istable(L,-1)){lua_pop(L,2);return;}int list=lua_absindex(L,-1),n=(int)lua_objlen(L,list);for(int i=1;i<=n;i++){lua_rawgeti(L,list,i);int o=lua_absindex(L,-1);if(!truthField(L,o,"Visible")){lua_pop(L,1);continue;}std::string type=fieldString(L,o,"Type");lua_getfield(L,o,"Color");SDL_Color c=colorOf(L,-1,{255,255,255,255});lua_pop(L,1);if(type=="Line"){lua_getfield(L,o,"From");int x1,y1;bool a=point2(L,-1,x1,y1);lua_pop(L,1);lua_getfield(L,o,"To");int x2,y2;bool b=point2(L,-1,x2,y2);lua_pop(L,1);if(a&&b)line(r,x1,y1,x2,y2,c);}else if(type=="Text"){drawText(r,10,110,fieldString(L,o,"Text"),c);}lua_pop(L,1);}lua_pop(L,2); }
 void line(SDL_Renderer* r,int x1,int y1,int x2,int y2,SDL_Color c) { SDL_SetRenderDrawColor(r,c.r,c.g,c.b,c.a); SDL_RenderDrawLine(r,x1,y1,x2,y2); }
 
 bool loadScript(lua_State* L,const char* path,int argc,char** argv) {
@@ -65,6 +71,11 @@ std::vector<Target> readPlayers(lua_State* L) {
     for(int i=1;i<=n;i++){lua_rawgeti(L,list,i); int p=lua_absindex(L,-1); std::string name=fieldString(L,p,"DisplayName"); if(name=="LocalPlayer"){lua_pop(L,1);continue;} lua_getfield(L,p,"Character"); int ch=lua_absindex(L,-1); if(lua_istable(L,ch)){lua_getfield(L,ch,"HumanoidRootPart"); if(lua_istable(L,-1)){Target t{name,positionOf(L,-1),hasHighlight(L,ch)}; out.push_back(t);} lua_pop(L,1);} lua_pop(L,2);}
     lua_pop(L,3); return out;
 }
+void fireSignal(lua_State* L,const char* service,const char* signal,float value) {
+    int top=lua_gettop(L); lua_getglobal(L,"game");lua_getfield(L,-1,"GetService");lua_pushvalue(L,-2);lua_pushstring(L,service);
+    if(lua_pcall(L,2,1,0)==0){lua_getfield(L,-1,"_signals");if(lua_istable(L,-1)){lua_getfield(L,-1,signal);lua_getfield(L,-1,"Fire");lua_pushvalue(L,-2);lua_pushnumber(L,value);if(lua_pcall(L,2,0,0)!=0)lua_pop(L,1);else{} }lua_settop(L,top);return;}lua_settop(L,top);
+}
+bool blocked(V3 a,V3 b) { V3 d=b-a; for(const Wall& w:kWalls){ if(std::abs(d.z)<.001f)continue; float t=(w.z-a.z)/d.z;if(t<=0||t>=1)continue;float x=a.x+d.x*t;if(x>w.x-w.w*.5f&&x<w.x+w.w*.5f&&a.y< w.h&&b.y<w.h)return true;}return false; }
 }
 
 int runVisual(const char* path,int argc,char** argv,bool sandbox) {
@@ -77,14 +88,17 @@ int runVisual(const char* path,int argc,char** argv,bool sandbox) {
     lua_State* L=luaL_newstate();luaL_openlibs(L); if(!loadScript(L,path,argc,argv)){lua_close(L);SDL_DestroyRenderer(renderer);SDL_DestroyWindow(win);SDL_Quit();return 1;}
     Camera cam; bool running=true, capture=true, aim=false; Uint64 last=SDL_GetPerformanceCounter(); SDL_SetRelativeMouseMode(SDL_TRUE);
     while(running){ Uint64 now=SDL_GetPerformanceCounter(); float dt=(float)((now-last)/(double)SDL_GetPerformanceFrequency());last=now;dt=std::min(dt,.05f); SDL_Event e; const Uint8* keys=SDL_GetKeyboardState(nullptr);
-        while(SDL_PollEvent(&e)){if(e.type==SDL_QUIT)running=false; if(e.type==SDL_KEYDOWN&&e.key.keysym.sym==SDLK_ESCAPE)running=false; if(e.type==SDL_KEYDOWN&&e.key.keysym.sym==SDLK_f)aim=!aim; if(e.type==SDL_MOUSEMOTION&&capture){cam.yaw+=e.motion.xrel*.003f;cam.pitch=std::clamp(cam.pitch-e.motion.yrel*.003f,-1.3f,1.3f);}}
+        while(SDL_PollEvent(&e)){if(e.type==SDL_QUIT)running=false; if(e.type==SDL_KEYDOWN&&e.key.keysym.sym==SDLK_ESCAPE)running=false; if(e.type==SDL_KEYDOWN&&e.key.keysym.sym==SDLK_f)aim=!aim; if(e.type==SDL_KEYDOWN||e.type==SDL_KEYUP)fireSignal(L,"UserInputService",e.type==SDL_KEYDOWN?"InputBegan":"InputEnded",dt); if(e.type==SDL_MOUSEMOTION&&capture){cam.yaw+=e.motion.xrel*.003f;cam.pitch=std::clamp(cam.pitch-e.motion.yrel*.003f,-1.3f,1.3f);}}
         V3 forward{std::sin(cam.yaw),0,std::cos(cam.yaw)}, right{std::cos(cam.yaw),0,-std::sin(cam.yaw)}; V3 move{0,0,0}; if(keys[SDL_SCANCODE_W])move=move+forward;if(keys[SDL_SCANCODE_S])move=move-forward;if(keys[SDL_SCANCODE_D])move=move+right;if(keys[SDL_SCANCODE_A])move=move-right;cam.pos=cam.pos+norm(move)*(10.f*dt);
         int w,h;SDL_GetRendererOutputSize(renderer,&w,&h);SDL_SetRenderDrawColor(renderer,34,42,48,255);SDL_RenderClear(renderer);
         // Ground with perspective grid.
         SDL_SetRenderDrawColor(renderer,54,115,62,255);SDL_Rect ground{0,h/2,w,h/2};SDL_RenderFillRect(renderer,&ground);
         for(int z=-40;z<=40;z+=4){int y=h/2+(int)(std::max(0,z+8)*4);line(renderer,0,y,w,y,{74,145,78,255});} for(int x=-60;x<=60;x+=4){int sx=w/2+x*10;line(renderer,sx,h/2,sx+w/3,h,{74,145,78,255});}
+        fireSignal(L,"RunService","Heartbeat",dt); fireSignal(L,"RunService","RenderStepped",dt);
         auto players=readPlayers(L); float best=1e9f; int bestIndex=-1;
-        for(size_t i=0;i<players.size();i++){V3 rel=players[i].pos-cam.pos;float depth=rel.z*std::cos(cam.yaw)-rel.x*std::sin(cam.yaw);float side=rel.x*std::cos(cam.yaw)+rel.z*std::sin(cam.yaw);if(depth<=.2f)continue;int sx=w/2+(int)(side/depth*520), sy=h/2-(int)((players[i].pos.y-cam.pos.y)/depth*520);int ph=std::max(18,(int)(420/depth)),pw=std::max(10,ph/3);bool visible=sx>0&&sx<w&&sy>0&&sy<h; if(visible){SDL_SetRenderDrawColor(renderer,50,120,220,255);SDL_Rect body{sx-pw/2,sy-ph,pw,ph};SDL_RenderFillRect(renderer,&body);SDL_SetRenderDrawColor(renderer,235,190,125,255);SDL_Rect head{sx-pw/3,sy-ph-std::max(8,pw/2),2*pw/3,std::max(8,pw/2)};SDL_RenderFillRect(renderer,&head); bool target=players[i].highlighted||aim; if(target){SDL_SetRenderDrawColor(renderer,(i==0&&aim)?255:255,(i==0&&aim)?230:75,50,255);SDL_Rect box{sx-pw,sy-ph-std::max(8,pw/2),pw*2,ph+std::max(8,pw/2)};SDL_RenderDrawRect(renderer,&box);line(renderer,w/2,h/2,sx,sy-ph/2,{255,80,50,255});} drawText(renderer,sx-(int)players[i].name.size()*3,sy-ph-18,players[i].name,{255,255,255,255});}float score=std::abs(side)+depth*.08f;if(score<best){best=score;bestIndex=(int)i;}}
+        for(size_t i=0;i<players.size();i++){V3 rel=players[i].pos-cam.pos;float depth=rel.z*std::cos(cam.yaw)-rel.x*std::sin(cam.yaw);float side=rel.x*std::cos(cam.yaw)+rel.z*std::sin(cam.yaw);if(depth<=.2f)continue;int sx=w/2+(int)(side/depth*520), sy=h/2-(int)((players[i].pos.y-cam.pos.y)/depth*520);int ph=std::max(18,(int)(420/depth)),pw=std::max(10,ph/3);bool visible=sx>0&&sx<w&&sy>0&&sy<h; bool occluded=blocked(cam.pos,players[i].pos); if(visible){SDL_SetRenderDrawColor(renderer,occluded?70:50,occluded?70:120,occluded?70:220,255);SDL_Rect body{sx-pw/2,sy-ph,pw,ph};SDL_RenderFillRect(renderer,&body);SDL_SetRenderDrawColor(renderer,235,190,125,255);SDL_Rect head{sx-pw/3,sy-ph-std::max(8,pw/2),2*pw/3,std::max(8,pw/2)};SDL_RenderFillRect(renderer,&head); bool target=players[i].highlighted||aim; if(target){SDL_SetRenderDrawColor(renderer,(i==0&&aim)?255:255,(i==0&&aim)?230:75,50,255);SDL_Rect box{sx-pw,sy-ph-std::max(8,pw/2),pw*2,ph+std::max(8,pw/2)};SDL_RenderDrawRect(renderer,&box);if(!occluded)line(renderer,w/2,h/2,sx,sy-ph/2,{255,80,50,255});} drawText(renderer,sx-(int)players[i].name.size()*3,sy-ph-18,players[i].name,{255,255,255,255});}float score=std::abs(side)+depth*.08f+(occluded?1000:0);if(score<best){best=score;bestIndex=(int)i;}}
+        if(aim&&bestIndex>=0){V3 d=players[bestIndex].pos-cam.pos;cam.yaw=std::atan2(d.x,d.z);}
+        renderDrawings(L,renderer);
         SDL_SetRenderDrawColor(renderer,255,255,255,255);SDL_Rect cross{w/2-8,h/2,16,1};SDL_RenderFillRect(renderer,&cross);SDL_Rect cross2{w/2,h/2-8,1,16};SDL_RenderFillRect(renderer,&cross2);
         SDL_SetRenderDrawColor(renderer,18,24,29,230);SDL_Rect panel{18,18,330,74};SDL_RenderFillRect(renderer,&panel);drawText(renderer,30,30,"LUMORA VISUAL LAB",{110,220,255,255});drawText(renderer,30,45,"WASD move | mouse look | F toggle aim",{230,230,230,255});drawText(renderer,30,60,aim?"AIM ASSIST: TARGETING":"ESP: HIGHLIGHTS ACTIVE",{255,190,80,255});if(bestIndex>=0&&aim)drawText(renderer,30,75,"locked: "+players[bestIndex].name,{255,100,90,255});
         SDL_RenderPresent(renderer);

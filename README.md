@@ -171,7 +171,7 @@ El punto de entrada recomendado es:
 ./bin/lumora --visual examples/visual_lab.lua
 ```
 
-La escena incluye un piso con cuadrícula de perspectiva, iluminación de color por jugador, etiquetas, cajas de ESP, líneas al centro de pantalla y selección de objetivo. La física deliberadamente se limita a movimiento de cámara y posicionamiento determinista; no pretende reproducir el motor físico completo de Roblox.
+La escena incluye un piso con cuadrícula de perspectiva, muros de prueba, iluminación de color por jugador, etiquetas, cajas de ESP, líneas al centro de pantalla y selección de objetivo. El renderer ejecuta `RunService.Heartbeat` y `RunService.RenderStepped` en cada frame, despacha input a `UserInputService`, dibuja objetos `Drawing.Line` y respeta oclusión contra los muros. Al activar `F`, la cámara se orienta al jugador visible más cercano al centro; esto permite probar la lógica de selección sin apuntar a un servicio externo. La física deliberadamente se limita a movimiento de cámara, oclusión y posicionamiento determinista; no pretende reproducir el motor físico completo de Roblox.
 
 ## Superficie Roblox emulada
 

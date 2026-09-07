@@ -23,4 +23,14 @@ end
 
 for _, player in simulated do attachHighlight(player) end
 Players.PlayerAdded:Connect(attachHighlight)
+local tracer = Drawing.new("Line")
+tracer.Visible = true
+tracer.From = Vector2.new(640, 360)
+tracer.To = Vector2.new(640, 220)
+tracer.Color = Color3.fromRGB(255, 220, 70)
+local frames = 0
+game:GetService("RunService").RenderStepped:Connect(function(delta)
+    frames += 1
+    tracer.To = Vector2.new(640 + math.sin(frames * delta) * 120, 220)
+end)
 print("visual lab:", #simulated, "players with script-driven highlights")

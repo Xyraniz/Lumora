@@ -7,6 +7,8 @@ All notable changes to Lumora are documented in this file. The format is based o
 ### Added
 - Native SDL2 visual laboratory with a perspective 3D floor, first-person camera, WASD/mouse input, simulated players, script-driven `Highlight` rendering, labels, ESP lines, and target selection.
 - `examples/visual_lab.lua` demonstrates Luau-created players and highlights inside the visual runtime.
+- Persistent per-frame Luau signal dispatch for `RunService.Heartbeat`, `RunService.RenderStepped`, and keyboard input through `UserInputService`.
+- Software-rendered test walls with line-of-sight occlusion, target selection that ignores blocked players, and rendering of Luau-created `Drawing.Line`/`Drawing.Text` objects.
 
 ### Added
 - Functional headless contracts for `TweenService`, `CollectionService`, camera projection/rays, virtual input, `ContextActionService`, `Debris`, `StarterGui`, and validated virtual assets through `getcustomasset`.

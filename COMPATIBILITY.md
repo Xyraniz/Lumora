@@ -138,12 +138,14 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | Área | Estado | Notas |
 | --- | --- | --- |
 | `lumora --visual script.lua` | ✅ | Ejecuta el mismo prelude Luau dentro de una ventana SDL2 y conserva el modo headless sin cambios. |
-| Mundo 3D | ✅ | Piso con cuadrícula de perspectiva, cámara en primera persona y proyección 3D determinista. |
-| Entrada | ✅ | WASD mueve la cámara, mouse rota la vista, `Esc` cierra y `F` activa la selección visual del objetivo. |
+| Mundo 3D | ✅ | Piso, muros de prueba, cámara en primera persona y proyección 3D determinista. |
+| Entrada y ciclo | ✅ | WASD mueve la cámara, mouse rota la vista, `Esc` cierra, `F` activa selección y cada frame dispara `Heartbeat`/`RenderStepped`. |
 | Jugadores simulados | ✅ | Los jugadores y personajes proceden del árbol real creado por Luau; sus posiciones se proyectan y renderizan. |
 | `Highlight` | ✅ | El renderer detecta `Highlight` habilitados bajo cada personaje y dibuja caja, color y línea de ESP. |
+| `Drawing.Line`/`Drawing.Text` | ✅ | Los objetos creados por Luau se consultan cada frame y se dibujan en pantalla. |
+| Oclusión y selección | ✅ | Los muros de prueba bloquean líneas ESP y el selector ignora objetivos ocluidos. |
 | `BillboardGui`/texto | 🟡 | Las etiquetas de jugador se renderizan como HUD nativo; el layout completo de Roblox aún no se reproduce. |
-| Física Roblox | 🔴 | El laboratorio usa movimiento de cámara y posiciones deterministas; no intenta sustituir el motor físico de Roblox. |
+| Física Roblox | 🔴 | El laboratorio usa movimiento de cámara, oclusión y posiciones deterministas; no intenta sustituir el motor físico completo de Roblox. |
 
 ## CLI y salida
 
