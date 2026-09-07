@@ -10,6 +10,7 @@ std::string readFile(const char* path);
 void pushArgs(lua_State* L, int argc, char** argv, int scriptIndex);
 void applySandbox(lua_State* L);
 int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox, double timeout);
+int runVisual(const char* path, int argc, char** argv, bool sandbox);
 
 // prelude.cpp
 bool installPrelude(lua_State* L);

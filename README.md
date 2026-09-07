@@ -78,10 +78,12 @@ El modo `--json` funciona en todas las plataformas. En Unix (Linux y macOS) se u
 ## Uso de la CLI
 
 ```text
-lumora [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]
+lumora [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]
 ```
 
 El modo Roblox headless está activado por defecto. `--no-roblox` omite el prelude y ejecuta el archivo con Luau puro. `--json` captura la ejecución y escribe un único objeto JSON con el esquema documentado más abajo. `--sandbox` deshabilita los globals peligrosos (`loadstring`, `load`, `os`, `io`, hooks de executor y los stubs de filesystem) y limita el scheduler a 10 ciclos, útil para acotar la superficie de scripts semi-confiables dentro de un pipeline. `--timeout 5` limita la ejecución a cinco segundos y evita que un bucle infinito bloquee el pipeline. `--help` y `--version` no ejecutan ningún script.
+
+`--visual` abre el laboratorio nativo de Lumora. Ejecuta el script en el mismo prelude Luau, crea un mundo pequeño con piso, cámara en primera persona, jugadores simulados y renderiza los `Highlight` que el script haya creado. El modo visual usa SDL2 y un renderer de software como fallback, por lo que no exige una GPU ni OpenGL. No se combina con `--json` ni `--no-roblox`.
 
 Los argumentos siguen la convención habitual de Lua: `arg[0]` contiene la ruta del script y `arg[1]` en adelante contienen los argumentos proporcionados por el usuario.
 
@@ -156,7 +158,20 @@ El directorio `examples/` contiene scripts listos para ejecutar que muestran las
 ./bin/lumora examples/datatypes.lua       # Vector3, CFrame, Color3, UDim2
 ./bin/lumora examples/instance_tree.lua   # Jerarquía, parenting y señales
 ./bin/lumora --json examples/json_pipeline.lua  # Salida estructurada para CI
+./bin/lumora --visual examples/visual_lab.lua    # Mundo 3D, WASD, ESP y selección de objetivo
 ```
+
+### Laboratorio visual
+
+El laboratorio visual no es una animación desconectada: el script Luau crea los `Player`, `Character` y `Highlight`, y el renderer consulta ese mismo árbol de instancias para dibujarlos. Esto permite probar lógica de ESP, selección de objetivos y cálculo de posiciones en pantalla sin abrir Roblox. `W`, `A`, `S` y `D` mueven la cámara, el mouse la rota, `F` activa la selección visual del objetivo más cercano al centro y `Esc` cierra la ventana.
+
+El punto de entrada recomendado es:
+
+```bash
+./bin/lumora --visual examples/visual_lab.lua
+```
+
+La escena incluye un piso con cuadrícula de perspectiva, iluminación de color por jugador, etiquetas, cajas de ESP, líneas al centro de pantalla y selección de objetivo. La física deliberadamente se limita a movimiento de cámara y posicionamiento determinista; no pretende reproducir el motor físico completo de Roblox.
 
 ## Superficie Roblox emulada
 
@@ -192,7 +207,8 @@ Para validar lógica visual de forma reproducible, el prelude expone `lumora.sim
 | `src/prelude.cpp` | Prelude Roblox headless embebido (Lua) y closures nativas en C (`loadstring`, `type`, `typeof`, `iscclosure`, etc.) con registro de globals. |
 | `src/runtime.cpp` | Utilidades de ejecución: lectura de archivos, paso de argumentos, timeout cooperativo, modo `--sandbox`, diagnóstico de errores y `runScript`. |
 | `src/json.cpp` | Escapado de strings, codec JSON de `HttpService`/`json` y validación de tipos/estructuras. |
-| `src/host_api.cpp` | Capacidades host locales: clipboard en memoria, stack inspection y metadatos de capacidades. |
+| `src/host_api.cpp` | Capacidades host locales: clipboard, stack inspection y metadatos de capacidades. |
+| `src/visual.cpp` | Ventana SDL2, renderer 3D proyectivo, input, cámara, mundo de prueba y puente de lectura del árbol Luau. |
 | `src/lumora.h` | Declaraciones compartidas entre los módulos de C++. |
 | `vendor/luau` | Fuentes oficiales vendorizados de Luau, incluyendo VM, compilador y biblioteca común. |
 | `tests/` | Smoke tests, contratos de CLI, sintaxis moderna, API Roblox, jerarquía, señales y scheduling. |

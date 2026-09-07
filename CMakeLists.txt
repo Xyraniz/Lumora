@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(Lumora VERSION 0.1.0 LANGUAGES C CXX)
+find_package(SDL2 REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,8 +18,9 @@ add_executable(lumora
     src/runtime.cpp
     src/json.cpp
     src/host_api.cpp
+    src/visual.cpp
 )
-target_link_libraries(lumora PRIVATE Luau.Compiler Luau.VM Luau.Common)
+target_link_libraries(lumora PRIVATE Luau.Compiler Luau.VM Luau.Common SDL2::SDL2)
 target_include_directories(lumora PRIVATE vendor/luau/VM/include vendor/luau/Compiler/include src)
 
 if(UNIX)

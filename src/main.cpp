@@ -30,7 +30,7 @@ static constexpr const char* kVersion = "lumora 0.3.0";
 
 int main(int argc, char** argv)
 {
-    bool roblox = true, json = false, sandbox = false;
+    bool roblox = true, json = false, sandbox = false, visual = false;
     double timeout = 0.0;
     std::vector<char*> scriptArgs;
     const char* script = nullptr;
@@ -41,9 +41,10 @@ int main(int argc, char** argv)
         if (option == "--no-roblox") roblox = false;
         else if (option == "--json") json = true;
         else if (option == "--sandbox") sandbox = true;
+        else if (option == "--visual") visual = true;
         else if (option == "--help" || option == "-h")
         {
-            std::cout << "usage: lumora [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
+            std::cout << "usage: lumora [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
             return 0;
         }
         else if (option == "--version")
@@ -71,7 +72,7 @@ int main(int argc, char** argv)
     }
     if (!script)
     {
-        std::cerr << "usage: lumora [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
+        std::cerr << "usage: lumora [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
         return 2;
     }
 
@@ -117,6 +118,16 @@ int main(int argc, char** argv)
     runArgs.push_back(argv[0]);
     runArgs.push_back(const_cast<char*>(script));
     for (char* a : scriptArgs) runArgs.push_back(a);
+
+    if (visual)
+    {
+        if (json || !roblox)
+        {
+            std::cerr << "--visual cannot be combined with --json or --no-roblox\n";
+            return 2;
+        }
+        return runVisual(script, int(runArgs.size()), runArgs.data(), sandbox);
+    }
 
     try
     {

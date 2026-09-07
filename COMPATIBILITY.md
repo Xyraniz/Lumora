@@ -133,6 +133,18 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `request` / `HttpService` de red | 🔴 | No hay transporte de red; las llamadas producen un error explícito. JSON y `UrlEncode` sí son locales. |
 | `TeleportService` | 🔴 | No existe cliente Roblox; las llamadas producen un error explícito. |
 
+## Laboratorio visual nativo
+
+| Área | Estado | Notas |
+| --- | --- | --- |
+| `lumora --visual script.lua` | ✅ | Ejecuta el mismo prelude Luau dentro de una ventana SDL2 y conserva el modo headless sin cambios. |
+| Mundo 3D | ✅ | Piso con cuadrícula de perspectiva, cámara en primera persona y proyección 3D determinista. |
+| Entrada | ✅ | WASD mueve la cámara, mouse rota la vista, `Esc` cierra y `F` activa la selección visual del objetivo. |
+| Jugadores simulados | ✅ | Los jugadores y personajes proceden del árbol real creado por Luau; sus posiciones se proyectan y renderizan. |
+| `Highlight` | ✅ | El renderer detecta `Highlight` habilitados bajo cada personaje y dibuja caja, color y línea de ESP. |
+| `BillboardGui`/texto | 🟡 | Las etiquetas de jugador se renderizan como HUD nativo; el layout completo de Roblox aún no se reproduce. |
+| Física Roblox | 🔴 | El laboratorio usa movimiento de cámara y posiciones deterministas; no intenta sustituir el motor físico de Roblox. |
+
 ## CLI y salida
 
 | API | Estado | Notas |
