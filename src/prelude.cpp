@@ -194,19 +194,25 @@ instance_mt.__newindex = function(self, key, value)
         rawset(properties, key, value)
         local signals = rawget(self, "_propSignals")
         if signals and old ~= value and signals[key] then signals[key]:Fire(value) end
+        if old ~= value and self.Changed then self.Changed:Fire(key) end
         return
     end
     local old = rawget(self, key)
     rawset(self, key, value)
     local signals = rawget(self, "_propSignals")
     if signals and old ~= value and signals[key] then signals[key]:Fire(value) end
+    if old ~= value and self.Changed then self.Changed:Fire(key) end
 end
 
 Instance = {}
 function Instance.new(className, parent)
     local o = setmetatable({ __type="Instance", _properties={
         ClassName=className, Name=className, AttributeChanged=signal(),
-        ChildAdded=signal(), ChildRemoved=signal()
+        ChildAdded=signal(), ChildRemoved=signal(), Changed=signal(),
+        MouseEnter=signal(), MouseLeave=signal(), MouseButton1Down=signal(),
+        MouseButton1Up=signal(), MouseButton1Click=signal(), Activated=signal(),
+        InputBegan=signal(), InputChanged=signal(), InputEnded=signal(),
+        Focused=signal(), FocusLost=signal()
     }, _children={}, _attributes={} }, instance_mt)
     -- BindableEvent: expose Event signal and Fire method like real Roblox
     if className == "BindableEvent" then
@@ -1545,6 +1551,32 @@ do
     function uis:KeyboardEnabled() return true end
     function uis:GamepadEnabled() return false end
     function uis:GetMouse() return { Hit = CFrame.new(0,0,0), X = 0, Y = 0, ViewportPoint = Vector3.new(0,0,0) } end
+end
+
+-- TextService: deterministic headless text measurement used by real UI libs.
+do
+    local textService = game:GetService("TextService")
+    function textService:GetTextSize(text, textSize, font, bounds)
+        text = tostring(text or "")
+        local size = tonumber(textSize) or 14
+        local width = math.min(#text * size * 0.52, (bounds and bounds.X) or math.huge)
+        local lines = math.max(1, math.ceil((#text * size * 0.52) / math.max((bounds and bounds.X) or math.huge, 1)))
+        return Vector2.new(width, size * 1.25 * lines)
+    end
+end
+
+-- Stats service values used by status bars and ping displays.
+do
+    local stats = game:GetService("Stats")
+    local network = stats:FindFirstChild("Network") or Instance.new("Folder", stats)
+    network.Name = "Network"
+    local serverStats = network:FindFirstChild("ServerStatsItem") or Instance.new("Folder", network)
+    serverStats.Name = "ServerStatsItem"
+    local ping = serverStats:FindFirstChild("Data Ping") or Instance.new("Folder", serverStats)
+    ping.Name = "Data Ping"
+    ping.GetValue = function() return 0 end
+    ping.GetValueString = function() return "0 ms" end
+    network.ServerStatsItem = serverStats
 end
 
 -- Players

@@ -9,6 +9,7 @@ All notable changes to Lumora are documented in this file. The format is based o
 - `examples/visual_lab.lua` demonstrates Luau-created players and highlights inside the visual runtime.
 - Persistent per-frame Luau signal dispatch for `RunService.Heartbeat`, `RunService.RenderStepped`, and keyboard input through `UserInputService`.
 - Software-rendered test walls with line-of-sight occlusion, target selection that ignores blocked players, and rendering of Luau-created `Drawing.Line`/`Drawing.Text` objects.
+- Full attached UI library fixture under `examples/attached_library.lua`, including `TextService:GetTextSize`, GUI interaction signals, `Changed`, `Stats.Network.ServerStatsItem.Data Ping`, and native CoreGui traversal.
 
 ### Added
 - Functional headless contracts for `TweenService`, `CollectionService`, camera projection/rays, virtual input, `ContextActionService`, `Debris`, `StarterGui`, and validated virtual assets through `getcustomasset`.

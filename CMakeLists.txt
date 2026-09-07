@@ -45,6 +45,7 @@ if(BUILD_TESTING)
     add_test(NAME host_api_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/host_api_contract.lua)
     add_test(NAME simulated_players_esp COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/simulated_players_esp.lua)
     add_test(NAME functional_apis_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/functional_apis_contract.lua)
+    add_test(NAME attached_library_load COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/examples/attached_library.lua)
 
     # These contracts are POSIX shell programs. Register them only where the
     # test runner can execute them; otherwise CTest reports misleading
