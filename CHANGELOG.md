@@ -4,6 +4,20 @@ All notable changes to Lumora are documented in this file. The format is based o
 
 ## [Unreleased]
 
+### Fixed
+- **CLI parity: `loadstring` and `collectgarbage` are now registered in `--no-roblox` mode** (`registerCLIGlobals` in `src/runtime.cpp`). The official Luau CLI registers both globals on top of the stock base library; Lumora previously lacked them in pure-Luau mode, so any script using them crashed with `attempt to call a nil value`. In Roblox mode the prelude's own Roblox-semantics `loadstring` still takes precedence (registered afterwards), so executor-facing behavior is unchanged.
+- **CLI parity: chunk names now use `"@" + normalizePath(path)`** (new `src/paths.cpp`, mirroring `CLI/src/FileUtils.cpp`'s `normalizePath`). Previously the raw path was passed to `luau_load`, so every runtime error, stack trace and `debug.info` location rendered as `[string "script.lua"]` instead of the plain path (`./script.lua:7: ...`), visibly different from official Luau. Relative paths are now normalized with the same `./` prefix and `..`-resolution rules as the reference CLI, making error output byte-identical.
+- **CLI parity: scripts now run in a fresh thread via `lua_newthread` + `lua_resume`** exactly like the official CLI's `runFile()`. Previously the main chunk ran via `lua_pcall` on the main state, which made `coroutine.isyieldable()` false at top level and changed error/traceback shape. Top-level yieldability and the `stacktrace:` section of uncaught errors now match the reference runtime.
+- **CLI parity: uncaught errors now include the VM's `stacktrace:` section** (`lua_debugtrace`), matching the official CLI's report format. Previously Lumora printed only the message (and the JSON-mode `traceback` field lost function names, which failed `tests/json_schema.sh` after the resume change). The message + `stacktrace:` output for a failing script is now byte-identical to `luau`.
+- Removed the now-unused `tracebackHandler` message handler left over from the `lua_pcall` execution path.
+
+### Changed
+- **Builtin library tables and the string metatable are now read-only** (`freezeLibraries` in `src/runtime.cpp`), matching both the official CLI (`luaL_sandbox`) and real Roblox, where tampering with `string`, `table`, `math`, `os`, `coroutine`, `debug`, `utf8`, `bit32`, `buffer`, `vector` or `getmetatable("")` errors with `attempt to modify a readonly table`. The globals environment itself stays writable (Roblox parity: scripts assign globals freely; the official CLI's `_G` freeze is a REPL sandbox policy Lumora deliberately does not adopt). `task` and `lumora` remain mutable runtime state.
+
+### Added
+- `tests/roblox_parity.lua` — asserts the deliberate divergences from the official CLI that match real Roblox instead: writable globals, frozen library tables/strmeta, working library functions, Roblox globals, task scheduler, loadstring semantics. Registered as the `roblox_parity` CTest target.
+- `tests/differential_contract.sh` — differential testing contract: the same probe script must produce byte-identical output under the official `luau` CLI and `lumora --no-roblox`. Skips gracefully (exit 0 with a message) when the reference CLI is not on PATH, so environments without it still pass. Registered as the `differential_contract` CTest target.
+
 ### Added
 - Native SDL2 visual laboratory with a perspective 3D floor, first-person camera, WASD/mouse input, simulated players, script-driven `Highlight` rendering, labels, ESP lines, and target selection.
 - `examples/visual_lab.lua` demonstrates Luau-created players and highlights inside the visual runtime.

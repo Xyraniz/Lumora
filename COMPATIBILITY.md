@@ -107,7 +107,8 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `setclipboard` / `getclipboard` | ✅ | Clipboard en memoria por defecto; backend del sistema opt-in mediante `LUMORA_SYSTEM_CLIPBOARD=1`, con fallback seguro. Eliminado en `--sandbox`. |
 | `getcallstack` | ✅ | Devuelve frames serializables con fuente, línea, nombre y tipo. Eliminado en `--sandbox`. |
 | `lumora.capabilities()` | ✅ | Describe capacidades locales (`memory`, `stub`, `disabled`, `headless`). Eliminado en `--sandbox`. |
-| `loadstring` / `load` | ✅ | Compila Luau a bytecode y carga. Eliminado en `--sandbox`. |
+| `loadstring` / `load` | ✅ | Compila Luau a bytecode y carga. Presente también en `--no-roblox` (paridad con el CLI oficial, que registra `loadstring` y `collectgarbage` como globals). Eliminado en `--sandbox`. |
+| Bibliotecas congeladas | ✅ | Escribir en `string`, `table`, `math`, `os`, `coroutine`, `debug`, `utf8`, `bit32`, `buffer`, `vector` o en `getmetatable("")` produce `attempt to modify a readonly table`, igual que en Roblox real y el CLI oficial. El entorno de globals sigue escribible (paridad con Roblox). |
 | Capa de executor (`hookfunction`, etc.) | 🟡 | Solo wrappers/inspección segura; hooks mutantes no están disponibles y no reportan mutación. Eliminados en `--sandbox`. |
 
 ## Filesystem y serialización
@@ -164,6 +165,6 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `--json` | ✅ | Esquema enriquecido de un solo nivel con `traceback` separado. |
 | `--sandbox` | ✅ | Reduce la superficie de globals peligrosos. |
 | `--timeout seconds` | ✅ | Timeout cooperativo en Luau + barrera a nivel de proceso. |
-| `--no-roblox` | ✅ | Ejecuta Luau puro sin el prelude. |
+| `--no-roblox` | ✅ | Ejecuta Luau puro sin el prelude, con paridad de superficie con el CLI oficial: `loadstring`/`collectgarbage` registrados, chunk names `"@" + normalizePath`, errores con `stacktrace:`, chunk principal en corrutina y tablas de biblioteca congeladas. |
 | `--help` / `--version` | ✅ | |
 | Códigos de salida | ✅ | `0` éxito, `1` error de script/timeout, `2` error de carga/invocación. |

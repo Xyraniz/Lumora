@@ -18,6 +18,7 @@ add_executable(lumora
     src/main.cpp
     src/prelude.cpp
     src/runtime.cpp
+    src/paths.cpp
     src/json.cpp
     src/host_api.cpp
     src/visual.cpp
@@ -48,6 +49,7 @@ if(BUILD_TESTING)
     add_test(NAME simulated_players_esp COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/simulated_players_esp.lua)
     add_test(NAME functional_apis_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/functional_apis_contract.lua)
     add_test(NAME attached_library_load COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/examples/attached_library.lua)
+    add_test(NAME roblox_parity COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/roblox_parity.lua)
 
     # These contracts are POSIX shell programs. Register them only where the
     # test runner can execute them; otherwise CTest reports misleading
@@ -58,5 +60,6 @@ if(BUILD_TESTING)
         add_test(NAME cli_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/cli_contract.sh $<TARGET_FILE:lumora>)
         add_test(NAME sandbox_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/sandbox_contract.sh $<TARGET_FILE:lumora>)
         add_test(NAME json_schema COMMAND ${CMAKE_SOURCE_DIR}/tests/json_schema.sh $<TARGET_FILE:lumora>)
+        add_test(NAME differential_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/differential_contract.sh $<TARGET_FILE:lumora>)
     endif()
 endif()

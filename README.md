@@ -81,7 +81,7 @@ El modo `--json` funciona en todas las plataformas. En Unix (Linux y macOS) se u
 lumora [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]
 ```
 
-El modo Roblox headless está activado por defecto. `--no-roblox` omite el prelude y ejecuta el archivo con Luau puro. `--json` captura la ejecución y escribe un único objeto JSON con el esquema documentado más abajo. `--sandbox` deshabilita los globals peligrosos (`loadstring`, `load`, `os`, `io`, hooks de executor y los stubs de filesystem) y limita el scheduler a 10 ciclos, útil para acotar la superficie de scripts semi-confiables dentro de un pipeline. `--timeout 5` limita la ejecución a cinco segundos y evita que un bucle infinito bloquee el pipeline. `--help` y `--version` no ejecutan ningún script.
+El modo Roblox headless está activado por defecto. `--no-roblox` omite el prelude y ejecuta el archivo con Luau puro, con la misma superficie de globals que el CLI oficial de Luau: `loadstring` y `collectgarbage` están registrados (al igual que en `luau`), los errores llevan el nombre de chunk y la sección `stacktrace:` idénticos al CLI oficial, y el chunk principal corre en una corrutina (`coroutine.isyieldable()` es verdadero a nivel superior). Las tablas de biblioteca (`string`, `table`, `math`, `os`, `coroutine`, `debug`, `utf8`, `bit32`, `buffer`, `vector`) y el metatable de string están congelados, igual que en Roblox real y en el CLI oficial; escribir en ellas produce `attempt to modify a readonly table`. El entorno de globals permanece escribible (paridad con Roblox). `--json` captura la ejecución y escribe un único objeto JSON con el esquema documentado más abajo. `--sandbox` deshabilita los globals peligrosos (`loadstring`, `load`, `os`, `io`, hooks de executor y los stubs de filesystem) y limita el scheduler a 10 ciclos, útil para acotar la superficie de scripts semi-confiables dentro de un pipeline. `--timeout 5` limita la ejecución a cinco segundos y evita que un bucle infinito bloquee el pipeline. `--help` y `--version` no ejecutan ningún script.
 
 `--visual` abre el laboratorio nativo de Lumora. Ejecuta el script en el mismo prelude Luau, crea un mundo pequeño con piso, cámara en primera persona, jugadores simulados y renderiza los `Highlight` que el script haya creado. El modo visual usa SDL2 y un renderer de software como fallback, por lo que no exige una GPU ni OpenGL. No se combina con `--json` ni `--no-roblox`.
 
@@ -210,7 +210,8 @@ Para validar lógica visual de forma reproducible, el prelude expone `lumora.sim
 | --- | --- |
 | `src/main.cpp` | Parseo de CLI, orquestación de la ejecución (fork/exec, timeout a nivel de proceso) y ensamblado del resultado JSON. |
 | `src/prelude.cpp` | Prelude Roblox headless embebido (Lua) y closures nativas en C (`loadstring`, `type`, `typeof`, `iscclosure`, etc.) con registro de globals. |
-| `src/runtime.cpp` | Utilidades de ejecución: lectura de archivos, paso de argumentos, timeout cooperativo, modo `--sandbox`, diagnóstico de errores y `runScript`. |
+| `src/runtime.cpp` | Utilidades de ejecución: lectura de archivos, paso de argumentos, timeout cooperativo, modo `--sandbox`, congelado de bibliotecas, registro de globals del CLI oficial (`loadstring`/`collectgarbage`), diagnóstico de errores con `stacktrace:` y `runScript`. |
+| `src/paths.cpp` | Normalización de rutas idéntica a `normalizePath` del CLI oficial (`CLI/src/FileUtils.cpp`), para que los chunk names y las ubicaciones de errores coincidan byte a byte con `luau`. |
 | `src/json.cpp` | Escapado de strings, codec JSON de `HttpService`/`json` y validación de tipos/estructuras. |
 | `src/host_api.cpp` | Capacidades host locales: clipboard, stack inspection y metadatos de capacidades. |
 | `src/visual.cpp` | Ventana SDL2, renderer 3D proyectivo, input, cámara, mundo de prueba y puente de lectura del árbol Luau. |
@@ -252,6 +253,11 @@ ctest --test-dir build --output-on-failure
 ```
 
 Las pruebas cubren argumentos y stdout, `--json`, timeouts, trazas de llamadas, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta y baja de hijos, atributos, enumeraciones, fidelidad de tipos de datos (Vector2/3, CFrame, Color3, UDim2), herencia de clases con `IsA`, destrucción recursiva, llamadas con `:`, señales de propiedades, scheduling, cancelación básica, capacidades host en memoria, codec JSON, modo `--sandbox` y validación del esquema JSON con un parser real.
+
+Además, dos contratos nuevos cubren la paridad con el CLI oficial de Luau:
+
+- `tests/roblox_parity.lua` verifica las divergencias deliberadas que imitan a Roblox real: globals escribibles, tablas de biblioteca congeladas (escribir en `string`/`table`/`math`/... o en `getmetatable("")` produce `attempt to modify a readonly table`), funciones de biblioteca intactas, globals Roblox y scheduler operativo.
+- `tests/differential_contract.sh` compara la salida byte a byte del mismo script bajo el CLI oficial `luau` (referencia) y `lumora --no-roblox`, incluyendo formato de errores, chunk names, `coroutine.isyieldable` y superficie de solo-lectura. Se omite con aviso si `luau` no está en PATH.
 
 ## Integración con otras herramientas
 
