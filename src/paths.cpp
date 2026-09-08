@@ -6,20 +6,24 @@
 // Mirrors the official Luau CLI's normalizePath() (CLI/src/FileUtils.cpp).
 // Both runtimes must render the same chunk name for the same script path so
 // runtime errors, stack traces and debug.info() locations agree. Notably a
-// relative path such as "main.lua" is normalized to "./main.lua" and "./" is
-// resolved away, but a leading "../" is preserved.
-static void splitPath(std::string_view path, std::vector<std::string_view>& out)
+// relative path such as "main.lua" is normalized to "./main.lua", "./" is
+// resolved away, and a leading ".." is preserved.
+static std::vector<std::string_view> splitPath(std::string_view path)
 {
-    size_t start = 0;
-    for (size_t i = 0; i <= path.size(); ++i)
+    // Same splitting rules as the reference implementation: both '/' and '\'
+    // are separators, and empty components are kept (the empty component at
+    // index 0 of an absolute path is what re-materializes the leading '/').
+    std::vector<std::string_view> components;
+    size_t pos = 0;
+    size_t nextPos = path.find_first_of("\\/", pos);
+    while (nextPos != std::string_view::npos)
     {
-        if (i == path.size() || path[i] == '/')
-        {
-            if (i > start)
-                out.push_back(path.substr(start, i - start));
-            start = i + 1;
-        }
+        components.push_back(path.substr(pos, nextPos - pos));
+        pos = nextPos + 1;
+        nextPos = path.find_first_of("\\/", pos);
     }
+    components.push_back(path.substr(pos));
+    return components;
 }
 
 static bool isAbsolutePath(std::string_view path)
@@ -29,13 +33,14 @@ static bool isAbsolutePath(std::string_view path)
 
 std::string normalizeChunkPath(std::string_view path)
 {
-    std::vector<std::string_view> components;
-    splitPath(path, components);
+    const std::vector<std::string_view> components = splitPath(path);
     std::vector<std::string_view> normalizedComponents;
 
     const bool isAbsolute = isAbsolutePath(path);
 
-    for (size_t i = isAbsolute ? 1 : 0; i < components.size(); ++i)
+    // 1. Normalize path components (drop "." and empty, resolve "..")
+    const size_t startIndex = isAbsolute ? 1 : 0;
+    for (size_t i = startIndex; i < components.size(); i++)
     {
         const std::string_view component = components[i];
         if (component == "..")
@@ -61,6 +66,8 @@ std::string normalizeChunkPath(std::string_view path)
     }
 
     std::string normalizedPath;
+
+    // 2. Add correct prefix to formatted path
     if (isAbsolute)
     {
         normalizedPath += components[0];
@@ -71,7 +78,8 @@ std::string normalizeChunkPath(std::string_view path)
         normalizedPath += "./";
     }
 
-    for (size_t i = 0; i < normalizedComponents.size(); ++i)
+    // 3. Join path components to form the normalized path
+    for (size_t i = 0; i < normalizedComponents.size(); i++)
     {
         if (i != 0)
             normalizedPath += "/";
