@@ -82,7 +82,7 @@ int capabilities(lua_State* L)
     lua_newtable(L);
     const int table = lua_gettop(L);
     setStringField(L, table, "runtime", "Lumora");
-    setStringField(L, table, "version", "0.3.0");
+    setStringField(L, table, "version", "0.4.0");
     std::string ignored;
     const bool systemClipboard = readSystemClipboard(ignored);
     setStringField(L, table, "clipboard", "memory");
@@ -157,7 +157,7 @@ void registerHostGlobals(lua_State* L)
         lua_newtable(L);
     }
     const int api = lua_gettop(L);
-    setStringField(L, api, "version", "0.3.0");
+    setStringField(L, api, "version", "0.4.0");
     registerFunction(L, api, "setClipboard", setClipboard);
     registerFunction(L, api, "getClipboard", getClipboard);
     registerFunction(L, api, "getCallStack", getCallStack);

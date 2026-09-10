@@ -26,7 +26,7 @@
 #endif
 
 // Lumora semantic version — keep in sync with CHANGELOG.md.
-static constexpr const char* kVersion = "lumora 0.3.0";
+static constexpr const char* kVersion = "lumora 0.4.0";
 
 int main(int argc, char** argv)
 {

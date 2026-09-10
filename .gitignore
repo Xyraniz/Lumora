@@ -3,3 +3,4 @@ bin/lumora
 bin/luau-vm
 .vscode/
 .idea/
+bin/*.exe

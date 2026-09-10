@@ -138,7 +138,7 @@ void applySandbox(lua_State* L)
         "request", "syn", "Drawing", "writefile", "readfile", "isfile",
         "isfolder", "makefolder", "delfile", "delfolder", "listfiles",
         "appendfile", "getconnections", "gethui", "protectgui", "setclipboard",
-        "getclipboard", "getcallstack", "lumora",
+        "getclipboard", "getcallstack", "lumora", "require",
         nullptr};
     for (int i = 0; kDangerousGlobals[i]; ++i)
     {
@@ -221,6 +221,10 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
         registerRobloxGlobals(L);
         registerHostGlobals(L);
     }
+    // Luau's require-by-string loader is available in both pure Luau and
+    // Roblox-prelude mode.  It resolves relative to the current chunk and
+    // keeps module results cached for the lifetime of this state.
+    registerRequire(L);
     // Freeze library tables + string metatable AFTER the prelude/registry
     // setup above (they mutate library tables while installing) and BEFORE
     // the user script runs, so the script sees the same read-only surface as
@@ -276,7 +280,27 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
         {
             lua_getfield(L, -1, "_runScheduler");
             if (lua_isfunction(L, -1))
-                lua_pcall(L, 0, 0, 0);
+            {
+                const int schedulerStatus = lua_pcall(L, 0, 2, 0);
+                if (schedulerStatus != 0)
+                {
+                    reportLuaError(L);
+                    rc = 1;
+                }
+                else
+                {
+                    const bool schedulerOk = lua_isboolean(L, -2) && lua_toboolean(L, -2);
+                    if (!schedulerOk)
+                    {
+                        lua_rawgeti(L, -1, 1);
+                        const char* taskError = lua_tostring(L, -1);
+                        std::cerr << "uncaught task error: " << (taskError ? taskError : "unknown error") << "\n";
+                        lua_pop(L, 1);
+                        rc = 1;
+                    }
+                    lua_pop(L, 2);
+                }
+            }
             else
                 lua_pop(L, 1);
         }

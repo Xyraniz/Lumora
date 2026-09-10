@@ -29,7 +29,7 @@ Los runtimes independientes de Luau suelen enfocarse en programación general o 
 
 ## Características principales
 
-Lumora acepta archivos `.lua` y `.luau` directamente, conserva la biblioteca estándar de Luau y soporta sintaxis moderna del compilador. La capa Roblox incluye jerarquías de instancias, servicios, atributos, señales, enumeraciones, tipos de datos y un scheduler cooperativo reducido. Las APIs headless mantienen estado, disparan eventos y aplican transformaciones cuando es posible; las capacidades externas que no existen en el proceso fallan explícitamente en vez de devolver un éxito vacío.
+Lumora acepta archivos `.lua` y `.luau` directamente, conserva la biblioteca estándar de Luau y soporta sintaxis moderna del compilador. La capa Roblox incluye jerarquías de instancias, servicios, atributos, señales, enumeraciones, tipos de datos y un scheduler cooperativo reducido. También incluye `require("./modulo")` con resolución de módulos del CLI oficial de Luau, paquetes `init.lua/init.luau` y caché por ejecución. Las APIs headless mantienen estado, disparan eventos y aplican transformaciones cuando es posible; las capacidades externas que no existen en el proceso fallan explícitamente en vez de devolver un éxito vacío.
 
 La salida normal conserva el stdout del script. Con `--json`, Lumora devuelve un objeto estructurado con el resultado de la ejecución, stdout, stderr, error y código de salida, lo que permite consumirlo desde scripts de shell, runners de pruebas, pipelines de CI o herramientas escritas en otros lenguajes.
 
@@ -37,7 +37,7 @@ La salida normal conserva el stdout del script. Con `--json`, Lumora devuelve un
 
 ### Requisitos
 
-Se necesita un compilador C++17, [CMake](https://cmake.org) y [Ninja](https://ninja-build.org). Los fuentes de Luau ya están incluidos en el repositorio, por lo que el build no requiere instalar Luau por separado ni descargar dependencias durante la compilación.
+Se necesita un compilador C++17, [CMake](https://cmake.org) y [Ninja](https://ninja-build.org). Los fuentes de Luau ya están incluidos en el repositorio, por lo que el build no requiere instalar Luau por separado ni descargar dependencias durante la compilación. SDL2, SDL2_ttf y SDL2_image son opcionales: solo hacen falta para compilar el laboratorio `--visual`; el runtime headless no depende de ellos.
 
 En Debian o Ubuntu:
 
@@ -83,9 +83,9 @@ lumora [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.
 
 El modo Roblox headless está activado por defecto. `--no-roblox` omite el prelude y ejecuta el archivo con Luau puro, con la misma superficie de globals que el CLI oficial de Luau: `loadstring` y `collectgarbage` están registrados (al igual que en `luau`), los errores llevan el nombre de chunk y la sección `stacktrace:` idénticos al CLI oficial, y el chunk principal corre en una corrutina (`coroutine.isyieldable()` es verdadero a nivel superior). Las tablas de biblioteca (`string`, `table`, `math`, `os`, `coroutine`, `debug`, `utf8`, `bit32`, `buffer`, `vector`) y el metatable de string están congelados, igual que en Roblox real y en el CLI oficial; escribir en ellas produce `attempt to modify a readonly table`. El entorno de globals permanece escribible (paridad con Roblox). `--json` captura la ejecución y escribe un único objeto JSON con el esquema documentado más abajo. `--sandbox` deshabilita los globals peligrosos (`loadstring`, `load`, `os`, `io`, hooks de executor y los stubs de filesystem) y limita el scheduler a 10 ciclos, útil para acotar la superficie de scripts semi-confiables dentro de un pipeline. `--timeout 5` limita la ejecución a cinco segundos y evita que un bucle infinito bloquee el pipeline. `--help` y `--version` no ejecutan ningún script.
 
-`--visual` abre el laboratorio nativo de Lumora. Ejecuta el script en el mismo prelude Luau, crea un mundo pequeño con piso, cámara en primera persona, jugadores simulados y renderiza los `Highlight` que el script haya creado. El modo visual usa SDL2 y un renderer de software como fallback, por lo que no exige una GPU ni OpenGL. No se combina con `--json` ni `--no-roblox`.
+`--visual` abre el laboratorio nativo de Lumora. Ejecuta el script en el mismo prelude Luau, crea un mundo pequeño con piso, cámara en primera persona, jugadores simulados y renderiza los `Highlight` que el script haya creado. El modo visual usa SDL2 y un renderer de software como fallback, por lo que no exige una GPU ni OpenGL. Si el binario fue compilado sin las dependencias SDL opcionales, el modo headless sigue funcionando y `--visual` termina con un error explícito. No se combina con `--json` ni `--no-roblox`.
 
-Los argumentos siguen la convención habitual de Lua: `arg[0]` contiene la ruta del script y `arg[1]` en adelante contienen los argumentos proporcionados por el usuario.
+Los argumentos siguen la convención habitual de Lua: `arg[0]` contiene la ruta del script y `arg[1]` en adelante contienen los argumentos proporcionados por el usuario. `require` acepta rutas relativas al módulo actual, busca primero `.luau` y después `.lua`, y también acepta directorios con `init.luau` o `init.lua`. Los resultados se cachean durante la ejecución, como en el loader oficial.
 
 ### Comandos básicos
 
@@ -190,7 +190,7 @@ La tabla siguiente resume la API cubierta por el prelude actual. La compatibilid
 | Atributos | `GetAttribute` y `SetAttribute`. |
 | Enumeraciones | `Enum.X.Y`, `Name`, `EnumType`, `FromName`, `FromValue` y `Value`. |
 | Tipos de datos | `typeof`, `Vector2`, `Vector3`, `UDim`, `UDim2`, `CFrame`, `Color3`, `BrickColor`, `Ray`, `RaycastParams`, `NumberRange`, `NumberSequence`, `ColorSequence`, `Font`, `Rect`, `Path2D` y `TweenInfo`. |
-| Scheduling | `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.wait`, además de los aliases globales habituales. |
+| Scheduling | `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.resume`, `task.deferSelf`, `task.wait`, además de los aliases globales habituales. Los errores de tareas se conservan y se reportan. |
 | Funciones de entorno | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv` y una capa de compatibilidad de executor (stubs seguros). |
 | Capacidades host seguras | `setclipboard`/`getclipboard` en memoria por defecto; clipboard del sistema opt-in con `LUMORA_SYSTEM_CLIPBOARD=1`, además de `getcallstack` y `lumora.capabilities()`. No acceden a Roblox. |
 | Filesystem de pruebas | `writefile`, `readfile`, `appendfile`, `isfile`, `isfolder`, `makefolder`, `delfile`, `delfolder`, `listfiles` y `loadfile` sobre un filesystem efímero en memoria. |
@@ -212,9 +212,10 @@ Para validar lógica visual de forma reproducible, el prelude expone `lumora.sim
 | `src/prelude.cpp` | Prelude Roblox headless embebido (Lua) y closures nativas en C (`loadstring`, `type`, `typeof`, `iscclosure`, etc.) con registro de globals. |
 | `src/runtime.cpp` | Utilidades de ejecución: lectura de archivos, paso de argumentos, timeout cooperativo, modo `--sandbox`, congelado de bibliotecas, registro de globals del CLI oficial (`loadstring`/`collectgarbage`), diagnóstico de errores con `stacktrace:` y `runScript`. |
 | `src/paths.cpp` | Normalización de rutas idéntica a `normalizePath` del CLI oficial (`CLI/src/FileUtils.cpp`), para que los chunk names y las ubicaciones de errores coincidan byte a byte con `luau`. |
+| `src/require.cpp` | Loader de módulos basado en `Luau.Require`, con resolución relativa, paquetes `init.*`, caché y ejecución aislada por coroutine. |
 | `src/json.cpp` | Escapado de strings, codec JSON de `HttpService`/`json` y validación de tipos/estructuras. |
 | `src/host_api.cpp` | Capacidades host locales: clipboard, stack inspection y metadatos de capacidades. |
-| `src/visual.cpp` | Ventana SDL2, renderer 3D proyectivo, input, cámara, mundo de prueba y puente de lectura del árbol Luau. |
+| `src/visual.cpp` / `src/visual_stub.cpp` | Laboratorio SDL2 cuando las dependencias están disponibles, o diagnóstico headless explícito cuando no lo están. |
 | `src/lumora.h` | Declaraciones compartidas entre los módulos de C++. |
 | `vendor/luau` | Fuentes oficiales vendorizados de Luau, incluyendo VM, compilador y biblioteca común. |
 | `tests/` | Smoke tests, contratos de CLI, sintaxis moderna, API Roblox, jerarquía, señales y scheduling. |
@@ -252,7 +253,7 @@ El equivalente directo es:
 ctest --test-dir build --output-on-failure
 ```
 
-Las pruebas cubren argumentos y stdout, `--json`, timeouts, trazas de llamadas, sintaxis moderna, biblioteca estándar, jerarquía y reparenting de instancias, eventos de alta y baja de hijos, atributos, enumeraciones, fidelidad de tipos de datos (Vector2/3, CFrame, Color3, UDim2), herencia de clases con `IsA`, destrucción recursiva, llamadas con `:`, señales de propiedades, scheduling, cancelación básica, capacidades host en memoria, codec JSON, modo `--sandbox` y validación del esquema JSON con un parser real.
+Las pruebas cubren argumentos y stdout, `--json`, timeouts, trazas de llamadas, sintaxis moderna, biblioteca estándar, `require` de módulos y paquetes, jerarquía y reparenting de instancias, eventos de alta y baja de hijos, atributos, enumeraciones, fidelidad de tipos de datos (Vector2/3, CFrame, Color3, UDim2), herencia de clases con `IsA`, destrucción recursiva, llamadas con `:`, señales de propiedades, scheduling, reanudación y errores de tareas, cancelación básica, capacidades host en memoria, codec JSON, modo `--sandbox` y validación del esquema JSON con un parser real.
 
 Además, dos contratos nuevos cubren la paridad con el CLI oficial de Luau:
 
@@ -274,6 +275,7 @@ Las funciones `setclipboard`/`getclipboard` usan una cadena en memoria del proce
 El flag `--sandbox` reduce la superficie disponible para el script, \u00fatil cuando se procesan scripts semi-confiables dentro de un pipeline y se quiere fallar r\u00e1pido ante intentos de acceso a primitivas peligrosas. Concretamente, `--sandbox`:
 
 - Elimina `loadstring` y `load` (no se puede compilar c\u00f3digo arbitrario en tiempo de ejecuci\u00f3n).
+- Elimina `require` (no se ejecutan m\u00f3dulos del sistema de archivos desde el entorno reducido).
 - Elimina las bibliotecas `os` e `io` (no hay acceso al sistema de archivos ni al entorno del proceso).
 - Elimina los hooks de executor y los stubs de filesystem del prelude.
 - Limita el scheduler cooperativo a 10 ciclos, acotando el trabajo que un script puede encolar.

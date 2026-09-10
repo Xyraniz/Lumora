@@ -382,29 +382,63 @@ local tasklib = {}
 tasklib._threads = {}      -- active coroutines waiting to be resumed
 tasklib._maxCycles = 50    -- safety: max scheduler iterations
 tasklib._cycleCount = 0
+tasklib._errors = {}       -- errors from detached task threads
 
-function tasklib.spawn(fn, ...)
-    local co = coroutine.create(fn)
-    tasklib._threads[co] = table.pack(...) or { n = 0 }
-    -- Resume immediately up to the first yield (e.g. task.wait())
-    local args = tasklib._threads[co]
+local function rememberTaskError(err)
+    table.insert(tasklib._errors, tostring(err))
+end
+
+local function makeTaskThread(routine)
+    if type(routine) == "thread" then return routine end
+    assert(type(routine) == "function", "task routine must be a function or thread")
+    return coroutine.create(routine)
+end
+
+local function resumeTask(co, args)
+    if coroutine.status(co) == "dead" then return false end
     local ok, err = coroutine.resume(co, table.unpack(args, 1, args.n))
-    if not ok and coroutine.status(co) ~= "dead" then
-        -- Propagate errors only if the coroutine died with an error
-        if coroutine.status(co) == "dead" then error(err, 0) end
+    if not ok then
+        rememberTaskError(err)
+        tasklib._threads[co] = nil
+        return false
     end
     if coroutine.status(co) == "dead" then
         tasklib._threads[co] = nil
     end
+    return true
+end
+
+function tasklib.spawn(fn, ...)
+    local co = makeTaskThread(fn)
+    local args = table.pack(...)
+    tasklib._threads[co] = args
+    -- Resume immediately up to the first yield (e.g. task.wait())
+    resumeTask(co, args)
     return co
 end
 
 function tasklib.delay(seconds, fn, ...)
     -- Keep delayed work pending until the scheduler. This preserves the
     -- cancellation window expected by Roblox-style code and contracts.
-    local co = coroutine.create(fn)
+    local co = makeTaskThread(fn)
     tasklib._threads[co] = table.pack(...)
     return co
+end
+
+-- Lute exposes an explicit resume operation for suspended task threads.  The
+-- result is the same thread handle, which makes it convenient to compose with
+-- task.cancel and task.delay.
+function tasklib.resume(co)
+    assert(type(co) == "thread", "task.resume expects a thread")
+    local args = tasklib._threads[co] or { n = 0 }
+    tasklib._threads[co] = args
+    resumeTask(co, args)
+    return co
+end
+
+-- Yield the current task and let the scheduler pick it up on the next cycle.
+function tasklib.deferSelf()
+    coroutine.yield()
 end
 
 function tasklib.cancel(co)
@@ -431,20 +465,16 @@ function tasklib._runScheduler()
         for co, args in pairs(tasklib._threads) do
             if coroutine.status(co) ~= "dead" then
                 anyAlive = true
-                local ok, err = coroutine.resume(co, table.unpack(args, 1, args.n))
-                if not ok then
-                    -- Silently drop errored threads (Roblox warns but continues)
-                    tasklib._threads[co] = nil
-                end
-                if coroutine.status(co) == "dead" then
-                    tasklib._threads[co] = nil
-                end
+                resumeTask(co, args)
             else
                 tasklib._threads[co] = nil
             end
         end
         if not anyAlive then break end
     end
+    local errors = tasklib._errors
+    tasklib._errors = {}
+    return #errors == 0, errors
 end
 
  task = tasklib
@@ -1577,6 +1607,17 @@ do
     ping.GetValue = function() return 0 end
     ping.GetValueString = function() return "0 ms" end
     network.ServerStatsItem = serverStats
+    serverStats["Data Ping"] = ping
+    -- Expose the same named properties as the child hierarchy.  Scripts
+    -- commonly use both Stats:WaitForChild("Network") and Stats.Network.
+    stats.Network = network
+    local workspaceStats = stats:FindFirstChild("Workspace") or Instance.new("Folder", stats)
+    workspaceStats.Name = "Workspace"
+    local heartbeat = workspaceStats:FindFirstChild("Heartbeat") or Instance.new("Folder", workspaceStats)
+    heartbeat.Name = "Heartbeat"
+    heartbeat.GetValueString = function() return "60" end
+    workspaceStats.Heartbeat = heartbeat
+    stats.Workspace = workspaceStats
 end
 
 -- Players

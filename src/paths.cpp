@@ -28,7 +28,12 @@ static std::vector<std::string_view> splitPath(std::string_view path)
 
 static bool isAbsolutePath(std::string_view path)
 {
-    return !path.empty() && path[0] == '/';
+    // Luau's CLI treats both POSIX paths and Windows drive-qualified paths as
+    // absolute.  Keeping the drive prefix here is important for require and
+    // for error chunk names when Lumora is invoked from CMake/PowerShell.
+    return (!path.empty() && (path[0] == '/' || path[0] == '\\')) ||
+           (path.size() >= 3 && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+            path[1] == ':' && (path[2] == '/' || path[2] == '\\'));
 }
 
 std::string normalizeChunkPath(std::string_view path)
@@ -39,6 +44,9 @@ std::string normalizeChunkPath(std::string_view path)
     const bool isAbsolute = isAbsolutePath(path);
 
     // 1. Normalize path components (drop "." and empty, resolve "..")
+    // For POSIX paths component 0 is the empty segment before '/', while for
+    // Windows it is the drive prefix (for example, "C:").  In both cases it
+    // belongs to the output prefix and must not be joined a second time.
     const size_t startIndex = isAbsolute ? 1 : 0;
     for (size_t i = startIndex; i < components.size(); i++)
     {

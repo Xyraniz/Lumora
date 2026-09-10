@@ -92,7 +92,17 @@ Esta matriz documenta el estado de implementación de cada área de la API Roblo
 | `task.delay(seconds, fn, ...)` | ✅ | Programa con retardo simulado. |
 | `task.cancel(thread)` | ✅ | Cancela un thread encolado. |
 | `task.wait(seconds)` | 🟡 | Retorna inmediatamente sin bloquear real. |
+| `task.resume(thread)` / `task.deferSelf()` | ✅ | Reanuda un thread suspendido o difiere el thread actual al siguiente ciclo cooperativo. |
+| Errores de tareas | ✅ | Los errores de threads desconectados se devuelven por `task._runScheduler()` y hacen fallar la ejecución si el runtime los drena sin consumirlos. |
 | `spawn` / `delay` / `wait` (globals) | ✅ | Aliases de `task.*`. |
+
+## Módulos Luau
+
+| API | Estado | Notas |
+| --- | --- | --- |
+| `require("./module")` | ✅ | Loader oficial `Luau.Require`; resuelve relativo al chunk actual, `.luau` antes que `.lua`, y conserva caché por ejecución. |
+| `require("./package")` | ✅ | Resuelve `package/init.luau` o `package/init.lua`. |
+| `require` en `--sandbox` | 🔴 | Se elimina junto con la carga dinámica y los stubs de filesystem para no ejecutar módulos host desde el entorno reducido. |
 
 ## Funciones de entorno
 

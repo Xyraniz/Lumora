@@ -67,7 +67,7 @@ void line(SDL_Renderer* r,int x1,int y1,int x2,int y2,SDL_Color c) { SDL_SetRend
 bool loadScript(lua_State* L,const char* path,int argc,char** argv) {
     std::ifstream f(path); if(!f) return false; std::string source((std::istreambuf_iterator<char>(f)),{});
     lua_createtable(L,argc,0); for(int i=0;i<argc;i++){lua_pushinteger(L,i);lua_pushstring(L,argv[i]);lua_settable(L,-3);} lua_setglobal(L,"arg");
-    if(!installPrelude(L)){std::fprintf(stderr,"visual: failed to install prelude\n");return false;} registerRobloxGlobals(L); registerHostGlobals(L);
+    if(!installPrelude(L)){std::fprintf(stderr,"visual: failed to install prelude\n");return false;} registerRobloxGlobals(L); registerHostGlobals(L); registerRequire(L);
     Luau::CompileOptions options; options.optimizationLevel=1; options.debugLevel=1; std::string bc=Luau::compile(source,options);
     if(luau_load(L,path,bc.data(),bc.size(),0)!=0){std::fprintf(stderr,"visual compile error: %s\n",lua_tostring(L,-1));return false;}
     if(lua_pcall(L,0,0,0)!=0){std::fprintf(stderr,"visual script error: %s\n",lua_tostring(L,-1));return false;}

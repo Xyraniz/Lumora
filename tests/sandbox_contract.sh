@@ -16,6 +16,7 @@ assert(setclipboard == nil, "setclipboard should be nil in sandbox")
 assert(getclipboard == nil, "getclipboard should be nil in sandbox")
 assert(getcallstack == nil, "getcallstack should be nil in sandbox")
 assert(lumora == nil, "lumora namespace should be nil in sandbox")
+assert(require == nil, "require should be nil in sandbox")
 print("sandbox-ok")
 LUA
 OUT=$("$VM" --sandbox "$TMP")

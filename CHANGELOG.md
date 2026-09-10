@@ -4,6 +4,26 @@ All notable changes to Lumora are documented in this file. The format is based o
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-10
+
+### Added
+- Native Luau require-by-string support backed by the official `Luau.Require` library. Relative `.lua`/`.luau` modules, `init.lua`/`init.luau` packages, module caching, shared Roblox globals, and useful module chunk names now work in both normal and `--no-roblox` mode.
+- `tests/require_contract.lua` plus fixture modules covering relative resolution, package initialization, cache identity, shared prelude globals, and missing-module diagnostics.
+- `task.resume` and `task.deferSelf`, based on the cooperative task surface used by Lute.
+- Scheduler error collection: detached task failures are retained in the result of `task._runScheduler()` and are reported as process failures when the runtime drains the scheduler.
+- `tests/scheduler_contract.lua` covering yield/resume behavior and asynchronous error propagation.
+- A headless CMake build path that automatically uses `src/visual_stub.cpp` when SDL2, SDL2_ttf, or SDL2_image is unavailable. The core runtime no longer requires visual dependencies.
+
+### Changed
+- Windows drive-qualified paths (`C:/...`) now normalize correctly for chunk names, stack traces, and require resolution.
+- `Stats.Network.ServerStatsItem["Data Ping"]` and `Stats.Workspace.Heartbeat` now mirror their child properties, fixing the attached UI fixture when scheduler errors are surfaced.
+- `--sandbox` now removes `require` as well as dynamic loading and filesystem compatibility globals, preventing sandboxed scripts from executing arbitrary host modules.
+- Version reported by `--version` and `lumora.capabilities()` is now `0.4.0`.
+
+### Fixed
+- Asynchronous task errors were silently discarded and could incorrectly produce exit code `0`.
+- The visual laboratory remains available when SDL dependencies are installed, while headless/CI builds now fail clearly only when `--visual` is requested without them.
+
 ### Fixed
 - **CLI parity: `loadstring` and `collectgarbage` are now registered in `--no-roblox` mode** (`registerCLIGlobals` in `src/runtime.cpp`). The official Luau CLI registers both globals on top of the stock base library; Lumora previously lacked them in pure-Luau mode, so any script using them crashed with `attempt to call a nil value`. In Roblox mode the prelude's own Roblox-semantics `loadstring` still takes precedence (registered afterwards), so executor-facing behavior is unchanged.
 - **CLI parity: chunk names now use `"@" + normalizePath(path)`** (new `src/paths.cpp`, mirroring `CLI/src/FileUtils.cpp`'s `normalizePath`). Previously the raw path was passed to `luau_load`, so every runtime error, stack trace and `debug.info` location rendered as `[string "script.lua"]` instead of the plain path (`./script.lua:7: ...`), visibly different from official Luau. Relative paths are now normalized with the same `./` prefix and `..`-resolution rules as the reference CLI, making error output byte-identical.
