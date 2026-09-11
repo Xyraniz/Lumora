@@ -4,6 +4,12 @@ All notable changes to Lumora are documented in this file. The format is based o
 
 ## [Unreleased]
 
+### Fixed
+- `@lune/luau.load` now accepts the Lune-compatible second argument with an
+  `environment` table and `@lune/luau.compile` returns real Luau bytecode.
+- `@lune/process.exit` and `@lune/stdio.write` are exposed by the embedded
+  compatibility modules.
+
 ## [0.4.0] — 2026-09-10
 
 ### Added

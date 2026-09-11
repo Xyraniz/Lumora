@@ -1,5 +1,6 @@
 #include "lua.h"
 #include "lualib.h"
+#include "Luau/Bytecode.h"
 #include "Luau/Compiler.h"
 #include "Luau/Require.h"
 #include "Luau/VfsNavigator.h"
@@ -7,6 +8,7 @@
 
 #include <fstream>
 #include <cstring>
+#include <iostream>
 #include <new>
 #include <sstream>
 #include <string>
@@ -18,6 +20,115 @@ struct RequireContext
     VfsNavigator vfs;
     std::string embedded;
 };
+
+static bool looksLikeBytecode(const char* data, size_t size)
+{
+    if (size == 0)
+        return false;
+    const unsigned char version = static_cast<unsigned char>(data[0]);
+    return version == 0 ||
+        (version >= LBC_VERSION_MIN && version <= LBC_VERSION_MAX) ||
+        version == LBC_VERSION_CLASSES;
+}
+
+static void addFunction(lua_State* L, int table, const char* name, lua_CFunction function)
+{
+    lua_pushcfunction(L, function, name);
+    lua_setfield(L, table, name);
+}
+
+static int luneCompile(lua_State* L)
+{
+    size_t size = 0;
+    const char* source = luaL_checklstring(L, 1, &size);
+    try
+    {
+        Luau::CompileOptions options;
+        options.optimizationLevel = 1;
+        options.debugLevel = 1;
+        const std::string bytecode = Luau::compile(std::string(source, size), options);
+        lua_pushlstring(L, bytecode.data(), bytecode.size());
+        return 1;
+    }
+    catch (const std::exception& error)
+    {
+        lua_pushnil(L);
+        lua_pushstring(L, error.what());
+        return 2;
+    }
+}
+
+static int luneLoad(lua_State* L)
+{
+    size_t size = 0;
+    const char* sourceOrBytecode = luaL_checklstring(L, 1, &size);
+    std::string bytecode;
+    try
+    {
+        if (looksLikeBytecode(sourceOrBytecode, size))
+            bytecode.assign(sourceOrBytecode, size);
+        else
+        {
+            Luau::CompileOptions options;
+            options.optimizationLevel = 1;
+            options.debugLevel = 1;
+            bytecode = Luau::compile(std::string(sourceOrBytecode, size), options);
+        }
+
+        if (luau_load(L, "=@lumora-lune-compat", bytecode.data(), bytecode.size(), 0) != 0)
+        {
+            const char* error = lua_tostring(L, -1);
+            const std::string message = error ? error : "Luau load failed";
+            lua_settop(L, 0);
+            lua_pushnil(L);
+            lua_pushstring(L, message.c_str());
+            return 2;
+        }
+
+        // Lune accepts { environment = table } as the second argument. The
+        // generated safe runners use this to keep recovered code in a closed
+        // lexical environment instead of the host globals.
+        const int functionIndex = lua_gettop(L);
+        if (lua_istable(L, 2))
+        {
+            lua_getfield(L, 2, "environment");
+            if (lua_istable(L, -1))
+                lua_setfenv(L, functionIndex);
+            else
+                lua_pop(L, 1);
+        }
+        return 1;
+    }
+    catch (const std::exception& error)
+    {
+        lua_settop(L, 0);
+        lua_pushnil(L);
+        lua_pushstring(L, error.what());
+        return 2;
+    }
+}
+
+static int luneStdioWrite(lua_State* L)
+{
+    const int count = lua_gettop(L);
+    for (int i = 1; i <= count; ++i)
+    {
+        size_t size = 0;
+        const char* value = luaL_tolstring(L, i, &size);
+        if (value)
+            std::cout.write(value, std::streamsize(size));
+        lua_pop(L, 1);
+    }
+    std::cout.flush();
+    return 0;
+}
+
+static int luneProcessExit(lua_State* L)
+{
+    const int code = int(luaL_optinteger(L, 1, 0));
+    luaL_error(L, "process.exit(%d)", code);
+    return 0;
+}
 
 static const char* embeddedModule(const char* name)
 {
@@ -56,16 +167,17 @@ static int embeddedRequire(lua_State* L)
         {
             copyHostField(L, module, "cwd"); copyHostField(L, module, "setCwd"); copyHostField(L, module, "env");
             lua_getglobal(L, "arg"); lua_setfield(L, module, "args");
+            addFunction(L, module, "exit", luneProcessExit);
         }
         else if (strcmp(name, "@lune/luau") == 0)
         {
-            lua_getglobal(L, "loadstring"); lua_setfield(L, module, "load");
-            lua_getglobal(L, "loadstring"); lua_setfield(L, module, "compile");
+            addFunction(L, module, "load", luneLoad);
+            addFunction(L, module, "compile", luneCompile);
         }
         else
         {
             lua_getglobal(L, "print"); lua_setfield(L, module, "print");
-            lua_getglobal(L, "print"); lua_setfield(L, module, "write");
+            addFunction(L, module, "write", luneStdioWrite);
             lua_getglobal(L, "print"); lua_setfield(L, module, "readLine");
         }
         return 1;
