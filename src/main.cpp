@@ -35,7 +35,8 @@ int main(int argc, char** argv)
     std::vector<char*> scriptArgs;
     const char* script = nullptr;
     std::string parseError;
-    for (int i = 1; i < argc; ++i)
+    int firstOption = (argc > 1 && std::string(argv[1]) == "run") ? 2 : 1;
+    for (int i = firstOption; i < argc; ++i)
     {
         std::string option = argv[i];
         if (option == "--no-roblox") roblox = false;
@@ -44,7 +45,7 @@ int main(int argc, char** argv)
         else if (option == "--visual") visual = true;
         else if (option == "--help" || option == "-h")
         {
-            std::cout << "usage: lumora [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
+            std::cout << "usage: lumora [run] [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
             return 0;
         }
         else if (option == "--version")
@@ -72,7 +73,7 @@ int main(int argc, char** argv)
     }
     if (!script)
     {
-        std::cerr << "usage: lumora [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
+        std::cerr << "usage: lumora [run] [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
         return 2;
     }
 

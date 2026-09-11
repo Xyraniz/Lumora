@@ -6,6 +6,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <array>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <system_error>
 
 namespace
 {
@@ -141,6 +145,79 @@ void registerFunction(lua_State* L, int table, const char* name, lua_CFunction f
     lua_pushcfunction(L, fn, name);
     lua_setfield(L, table, name);
 }
+
+int luneReadFile(lua_State* L)
+{
+    const char* path = luaL_checkstring(L, 1);
+    std::ifstream input(path, std::ios::binary);
+    if (!input) { luaL_error(L, "could not read file '%s'", path); return 0; }
+    std::ostringstream contents; contents << input.rdbuf();
+    const std::string value = contents.str();
+    lua_pushlstring(L, value.data(), value.size());
+    return 1;
+}
+
+int luneWriteFile(lua_State* L)
+{
+    const char* path = luaL_checkstring(L, 1); size_t length = 0;
+    const char* data = luaL_checklstring(L, 2, &length);
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) { luaL_error(L, "could not write file '%s'", path); return 0; }
+    output.write(data, std::streamsize(length));
+    if (!output) { luaL_error(L, "could not write file '%s'", path); return 0; }
+    return 0;
+}
+
+int lunePathExists(lua_State* L)
+{
+    std::error_code error; const bool exists = std::filesystem::exists(luaL_checkstring(L, 1), error);
+    lua_pushboolean(L, exists && !error); return 1;
+}
+
+int luneReadDir(lua_State* L)
+{
+    const char* path = luaL_optstring(L, 1, "."); std::error_code error;
+    lua_newtable(L); int index = 1;
+    for (const auto& entry : std::filesystem::directory_iterator(path, error))
+    {
+        lua_pushstring(L, entry.path().filename().string().c_str()); lua_rawseti(L, -2, index++);
+    }
+    if (error) { luaL_error(L, "could not read directory '%s'", path); return 0; }
+    return 1;
+}
+
+int luneMakeDir(lua_State* L)
+{
+    std::error_code error; const bool ok = std::filesystem::create_directories(luaL_checkstring(L, 1), error);
+    lua_pushboolean(L, (ok || !error)); return 1;
+}
+
+int luneRemove(lua_State* L)
+{
+    std::error_code error; const bool ok = std::filesystem::remove_all(luaL_checkstring(L, 1), error) > 0;
+    if (error) { luaL_error(L, "could not remove path"); return 0; }
+    lua_pushboolean(L, ok); return 1;
+}
+
+int luneCwd(lua_State* L)
+{
+    std::error_code error; const auto path = std::filesystem::current_path(error);
+    if (error) { luaL_error(L, "could not get current directory"); return 0; }
+    lua_pushstring(L, path.string().c_str()); return 1;
+}
+
+int luneSetCwd(lua_State* L)
+{
+    std::error_code error; std::filesystem::current_path(luaL_checkstring(L, 1), error);
+    if (error) { luaL_error(L, "could not change current directory"); return 0; }
+    return 0;
+}
+
+int luneEnv(lua_State* L)
+{
+    const char* name = luaL_checkstring(L, 1); const char* value = std::getenv(name);
+    if (value) lua_pushstring(L, value); else lua_pushnil(L); return 1;
+}
 }
 
 void registerHostGlobals(lua_State* L)
@@ -163,4 +240,19 @@ void registerHostGlobals(lua_State* L)
     registerFunction(L, api, "getCallStack", getCallStack);
     registerFunction(L, api, "capabilities", capabilities);
     lua_setglobal(L, "lumora");
+}
+
+void registerEmbeddedLuneHost(lua_State* L)
+{
+    lua_newtable(L); const int api = lua_gettop(L);
+    registerFunction(L, api, "readFile", luneReadFile);
+    registerFunction(L, api, "writeFile", luneWriteFile);
+    registerFunction(L, api, "exists", lunePathExists);
+    registerFunction(L, api, "readDir", luneReadDir);
+    registerFunction(L, api, "makeDir", luneMakeDir);
+    registerFunction(L, api, "remove", luneRemove);
+    registerFunction(L, api, "cwd", luneCwd);
+    registerFunction(L, api, "setCwd", luneSetCwd);
+    registerFunction(L, api, "env", luneEnv);
+    lua_setglobal(L, "__lumora_lune");
 }

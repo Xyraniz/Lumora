@@ -332,3 +332,7 @@ Lumora se distribuye bajo la [licencia MIT](LICENSE). Los fuentes vendorizados d
 [1]: https://luau.org "Luau"
 [2]: https://github.com/lune-org/lune "Lune — standalone Luau runtime"
 [3]: https://github.com/luau-lang/lute "Lute — standalone Luau runtime for general-purpose programming"
+
+## Compatibilidad autónoma con runners de Lune
+
+Lumora puede ejecutar runners generados para el contrato habitual de Lune sin instalar Lune ni descargar módulos durante la ejecución. `lumora run script.luau` y el launcher local `bin/lune script.luau` son equivalentes; ambos cargan desde el propio binario los módulos `@lune/fs`, `@lune/luau`, `@lune/stdio` y `@lune/process`. Las operaciones de filesystem y proceso son locales y deterministas, y no habilitan red ni servicios externos. Esto permite copiar un runner generado por otro pipeline al repositorio y ejecutarlo con una única dependencia: el binario Lumora construido con las fuentes vendorizadas.

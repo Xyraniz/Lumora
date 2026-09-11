@@ -221,6 +221,7 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
         registerRobloxGlobals(L);
         registerHostGlobals(L);
     }
+    registerEmbeddedLuneHost(L);
     // Luau's require-by-string loader is available in both pure Luau and
     // Roblox-prelude mode.  It resolves relative to the current chunk and
     // keeps module results cached for the lifetime of this state.

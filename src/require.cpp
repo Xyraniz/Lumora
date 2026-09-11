@@ -16,7 +16,65 @@ namespace
 struct RequireContext
 {
     VfsNavigator vfs;
+    std::string embedded;
 };
+
+static const char* embeddedModule(const char* name)
+{
+    if (!name) return nullptr;
+    if (strcmp(name, "@lune/fs") == 0)
+        return "local h=__lumora_lune; return {readFile=h.readFile,writeFile=h.writeFile,exists=h.exists,readDir=h.readDir,makeDir=h.makeDir,remove=h.remove,move=function(a,b) local d=h.readFile(a); h.writeFile(b,d); h.remove(a) end,copy=function(a,b) h.writeFile(b,h.readFile(a)) end,isFile=function(p) return h.exists(p) and true or false end,isDir=function(p) return h.exists(p) and true or false end} \n";
+    if (strcmp(name, "@lune/stdio") == 0)
+        return "return {write=function(...) io.write(...) end,print=print,readLine=function() return io.read(\"*l\") end} \n";
+    if (strcmp(name, "@lune/process") == 0)
+        return "local p={}; p.args=arg; p.cwd=__lumora_lune.cwd; p.setCwd=__lumora_lune.setCwd; p.env=__lumora_lune.env; p.exit=function(code) error({__lumora_process_exit=code or 0}) end; return p\n";
+    if (strcmp(name, "@lune/luau") == 0)
+        return "return {load=loadstring,compile=function(source) return loadstring(source) end}\n";
+    return nullptr;
+}
+
+static void copyHostField(lua_State* L, int table, const char* name)
+{
+    lua_getglobal(L, "__lumora_lune");
+    lua_getfield(L, -1, name);
+    lua_setfield(L, table, name);
+    lua_pop(L, 1);
+}
+
+static int embeddedRequire(lua_State* L)
+{
+    const char* name = luaL_checkstring(L, 1);
+    if (embeddedModule(name))
+    {
+        lua_newtable(L); const int module = lua_gettop(L);
+        if (strcmp(name, "@lune/fs") == 0)
+        {
+            const char* fields[] = {"readFile", "writeFile", "exists", "readDir", "makeDir", "remove", nullptr};
+            for (int i = 0; fields[i]; ++i) copyHostField(L, module, fields[i]);
+        }
+        else if (strcmp(name, "@lune/process") == 0)
+        {
+            copyHostField(L, module, "cwd"); copyHostField(L, module, "setCwd"); copyHostField(L, module, "env");
+            lua_getglobal(L, "arg"); lua_setfield(L, module, "args");
+        }
+        else if (strcmp(name, "@lune/luau") == 0)
+        {
+            lua_getglobal(L, "loadstring"); lua_setfield(L, module, "load");
+            lua_getglobal(L, "loadstring"); lua_setfield(L, module, "compile");
+        }
+        else
+        {
+            lua_getglobal(L, "print"); lua_setfield(L, module, "print");
+            lua_getglobal(L, "print"); lua_setfield(L, module, "write");
+            lua_getglobal(L, "print"); lua_setfield(L, module, "readLine");
+        }
+        return 1;
+    }
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, 1, 1);
+    return 1;
+}
 
 static luarequire_NavigateResult convert(NavigationStatus status)
 {
@@ -54,6 +112,12 @@ static bool requireAllowed(lua_State* /*L*/, void* /*ctx*/, const char* chunkNam
 static luarequire_NavigateResult reset(lua_State* /*L*/, void* ctx, const char* chunkName)
 {
     RequireContext* context = static_cast<RequireContext*>(ctx);
+    context->embedded.clear();
+    if (chunkName && embeddedModule(chunkName))
+    {
+        context->embedded = chunkName;
+        return NAVIGATE_SUCCESS;
+    }
     return convert(context->vfs.resetToPath(chunkName && chunkName[0] == '@' ? chunkName + 1 : ""));
 }
 
@@ -81,6 +145,7 @@ static luarequire_NavigateResult toChild(lua_State* /*L*/, void* ctx, const char
 static bool modulePresent(lua_State* /*L*/, void* ctx)
 {
     RequireContext* context = static_cast<RequireContext*>(ctx);
+    if (!context->embedded.empty()) return true;
     return !context->vfs.getFilePath().empty();
 }
 
@@ -100,16 +165,22 @@ static luarequire_WriteResult writeString(const std::string& value, char* buffer
 
 static luarequire_WriteResult getChunkName(lua_State* /*L*/, void* ctx, char* buffer, size_t bufferSize, size_t* sizeOut)
 {
+    RequireContext* context = static_cast<RequireContext*>(ctx);
+    if (!context->embedded.empty()) return writeString(context->embedded, buffer, bufferSize, sizeOut);
     return writeString("@" + static_cast<RequireContext*>(ctx)->vfs.getFilePath(), buffer, bufferSize, sizeOut);
 }
 
 static luarequire_WriteResult getLoadName(lua_State* /*L*/, void* ctx, char* buffer, size_t bufferSize, size_t* sizeOut)
 {
+    RequireContext* context = static_cast<RequireContext*>(ctx);
+    if (!context->embedded.empty()) return writeString(context->embedded, buffer, bufferSize, sizeOut);
     return writeString(static_cast<RequireContext*>(ctx)->vfs.getAbsoluteFilePath(), buffer, bufferSize, sizeOut);
 }
 
 static luarequire_WriteResult getCacheKey(lua_State* /*L*/, void* ctx, char* buffer, size_t bufferSize, size_t* sizeOut)
 {
+    RequireContext* context = static_cast<RequireContext*>(ctx);
+    if (!context->embedded.empty()) return writeString(context->embedded, buffer, bufferSize, sizeOut);
     return writeString(static_cast<RequireContext*>(ctx)->vfs.getAbsoluteFilePath(), buffer, bufferSize, sizeOut);
 }
 
@@ -128,8 +199,8 @@ static luarequire_WriteResult getConfig(lua_State* /*L*/, void* /*ctx*/, char* /
 static int loadModule(lua_State* L, void* ctx, const char* /*path*/, const char* chunkName, const char* loadName)
 {
     RequireContext* context = static_cast<RequireContext*>(ctx);
-    (void)context;
-    const std::string source = readModule(loadName);
+    const char* builtIn = embeddedModule(context->embedded.c_str());
+    const std::string source = builtIn ? builtIn : readModule(loadName);
     if (source.empty() && !std::ifstream(loadName, std::ios::binary).good())
         luaL_error(L, "could not read module '%s'", loadName ? loadName : "");
 
@@ -197,4 +268,7 @@ void registerRequire(lua_State* L)
     lua_settable(L, LUA_REGISTRYINDEX);
 
     luaopen_require(L, requireConfigInit, storage);
+    lua_getglobal(L, "require");
+    lua_pushcclosure(L, embeddedRequire, "require", 1);
+    lua_setglobal(L, "require");
 }
