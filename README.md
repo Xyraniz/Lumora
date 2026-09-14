@@ -190,7 +190,7 @@ The following table summarizes the API covered by the current prelude. Compatibi
 | Attributes | `GetAttribute` and `SetAttribute`. |
 | Enums | `Enum.X.Y`, `Name`, `EnumType`, `FromName`, `FromValue` and `Value`. |
 | Data types | `typeof`, `Vector2`, `Vector3`, `UDim`, `UDim2`, `CFrame`, `Color3`, `BrickColor`, `Ray`, `RaycastParams`, `NumberRange`, `NumberSequence`, `ColorSequence`, `Font`, `Rect`, `Path2D` and `TweenInfo`. |
-| Scheduling | `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.resume`, `task.deferSelf`, `task.wait`, plus the usual global aliases. Task errors are preserved and reported. |
+| Scheduling | `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.resume`, `task.deferSelf`, `task.wait`, plus the usual global aliases. Task errors are preserved and reported. `RunService:BindToRenderStep` callbacks run in deterministic priority order and can be removed with `UnbindFromRenderStep`. |
 | Environment functions | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv` and an executor compatibility layer (safe stubs). |
 | Safe host capabilities | `setclipboard`/`getclipboard` in-memory by default; system clipboard opt-in via `LUMORA_SYSTEM_CLIPBOARD=1`, plus `getcallstack` and `lumora.capabilities()`. They do not access Roblox. |
 | Test filesystem | `writefile`, `readfile`, `appendfile`, `isfile`, `isfolder`, `makefolder`, `delfile`, `delfolder`, `listfiles` and `loadfile` over an ephemeral in-memory filesystem. |
@@ -236,7 +236,7 @@ Lumora CLI ──► Luau compiler ──► VM Luau
         │                              ├─ Cooperative scheduler
         │                              └─ Timeout / interrupt
         ▼
-stdout, stderr, exit code o resultado JSON
+stdout, stderr, exit code or JSON result
 ```
 
 ## Tests

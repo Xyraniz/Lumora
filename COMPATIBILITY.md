@@ -95,6 +95,7 @@ This matrix documents the implementation status of each area of the Roblox API e
 | `task.resume(thread)` / `task.deferSelf()` | ✅ | Resumes a suspended thread or defers the current thread to the next cooperative tick. |
 | Task errors | ✅ | Errors from disconnected threads are returned by `task._runScheduler()` and fail execution if the runtime drains them without consuming. |
 | `spawn` / `delay` / `wait` (globals) | ✅ | Aliases for `task.*`. |
+| `RunService:BindToRenderStep` / `UnbindFromRenderStep` | ✅ | Callbacks execute in ascending priority order; equal priorities preserve bind order. The visual loop dispatches them before `RenderStepped`. |
 
 ## Luau modules
 

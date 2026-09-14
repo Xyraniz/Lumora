@@ -8,6 +8,8 @@ All notable changes to Lumora are documented in this file. The format is based o
 - Deterministic headless `Workspace:Raycast` support against axis-aligned `BasePart` bounds. Results expose `Instance`, `Position`, `Distance`, `Normal`, `Material`, and the `RaycastResult` type marker.
 - `RaycastParams.FilterDescendantsInstances` support for both `Exclude` and `Include` filtering, with `CanCollide` respected during intersection tests.
 - `tests/raycast_contract.lua`, covering nearest-hit selection, distance, surface normals, and exclusion filtering.
+- Functional `RunService:BindToRenderStep` and `UnbindFromRenderStep` callbacks with deterministic priority ordering, replacement by name, and visual-loop dispatch.
+- `tests/runservice_contract.lua`, covering priority order, equal-priority stability, callback execution, and unbinding.
 - `CFrame:ToEulerAnglesXYZ()` and `CFrame:ToOrientation()` now recover rotations from composed matrices.
 - `VirtualUser` mouse button methods now dispatch observable `UserInputService` input events; `MoveCamera` updates the supplied camera.
 - Regression coverage for CFrame angle round-tripping and VirtualUser input dispatch in `tests/properties_contract.lua`.
@@ -15,6 +17,7 @@ All notable changes to Lumora are documented in this file. The format is based o
 ### Changed
 - Repository documentation in `README.md`, `COMPATIBILITY.md`, and `CHANGELOG.md` is now written in technical English.
 - Compatibility documentation now describes the new orientation and virtual-input behavior.
+- The visual laboratory now dispatches bound render-step callbacks before `RenderStepped`, matching the expected frame lifecycle more closely.
 
 ### Fixed
 - `@lune/luau.load` now accepts the Lune-compatible second argument with an

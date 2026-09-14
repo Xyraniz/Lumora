@@ -1560,8 +1560,31 @@ end
 do
     local rs = game:GetService("RunService")
     rs._signals = { RenderStep = signal(), Heartbeat = signal(), Stepped = signal(), RenderStepped = signal() }
-    function rs:BindToRenderStep(name, priority, fn) end
-    function rs:UnbindFromRenderStep(name) end
+    rs._renderBindings = {}
+    rs._nextRenderOrder = 0
+    function rs:BindToRenderStep(name, priority, fn)
+        assert(type(name) == "string", "BindToRenderStep name must be a string")
+        assert(type(priority) == "number", "BindToRenderStep priority must be a number")
+        assert(type(fn) == "function", "BindToRenderStep callback must be a function")
+        local previous = rs._renderBindings[name]
+        if not previous then rs._nextRenderOrder += 1 end
+        rs._renderBindings[name] = { priority = priority, fn = fn, order = previous and previous.order or rs._nextRenderOrder }
+    end
+    function rs:UnbindFromRenderStep(name)
+        rs._renderBindings[name] = nil
+    end
+    function rs:_fireRenderStep(dt)
+        local bindings = {}
+        for name, binding in pairs(rs._renderBindings) do
+            table.insert(bindings, { name = name, priority = binding.priority, fn = binding.fn, order = binding.order })
+        end
+        table.sort(bindings, function(a, b)
+            if a.priority == b.priority then return a.order < b.order end
+            return a.priority < b.priority
+        end)
+        for _, binding in ipairs(bindings) do binding.fn(dt) end
+        rs._signals.RenderStep:Fire(dt)
+    end
     function rs:Heartbeat() return rs._signals.Heartbeat end
     function rs:RenderStepped() return rs._signals.RenderStepped end
     function rs:Stepped() return rs._signals.Stepped end
