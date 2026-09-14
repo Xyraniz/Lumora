@@ -1886,7 +1886,67 @@ do
     end
     function cam:ScreenPointToRay(x, y, depth) return self:ViewportPointToRay(x, y, depth) end
     function cam:GetPartsObscuringTarget(targets, ignoreList) return {} end
-    function cam:Raycast(origin, direction, params) return nil end
+    -- Deterministic headless raycast against axis-aligned BasePart bounds.
+    local function _isDescendantOf(node, ancestor)
+        local current = node
+        while current do
+            if current == ancestor then return true end
+            current = current.Parent
+        end
+        return false
+    end
+    local function _rayAabb(origin, unit, maxDistance, center, size)
+        local minB, maxB = center - size * 0.5, center + size * 0.5
+        local tMin, tMax = 0, maxDistance
+        local axes = {{origin.X, unit.X, minB.X, maxB.X}, {origin.Y, unit.Y, minB.Y, maxB.Y}, {origin.Z, unit.Z, minB.Z, maxB.Z}}
+        for _, axis in ipairs(axes) do
+            local o, d, lo, hi = axis[1], axis[2], axis[3], axis[4]
+            if math.abs(d) < 1e-12 then
+                if o < lo or o > hi then return nil end
+            else
+                local a, b = (lo - o) / d, (hi - o) / d
+                if a > b then a, b = b, a end
+                tMin, tMax = math.max(tMin, a), math.min(tMax, b)
+                if tMin > tMax then return nil end
+            end
+        end
+        local hit = origin + unit * tMin
+        local delta, half = hit - center, size * 0.5
+        local ax = math.abs(math.abs(delta.X) - half.X)
+        local ay = math.abs(math.abs(delta.Y) - half.Y)
+        local az = math.abs(math.abs(delta.Z) - half.Z)
+        local normal
+        if ax <= ay and ax <= az then normal = Vector3.new(delta.X >= 0 and 1 or -1, 0, 0)
+        elseif ay <= az then normal = Vector3.new(0, delta.Y >= 0 and 1 or -1, 0)
+        else normal = Vector3.new(0, 0, delta.Z >= 0 and 1 or -1) end
+        return tMin, hit, normal
+    end
+    function ws:Raycast(origin, direction, params)
+        local length = direction.Magnitude
+        if length <= 1e-12 then return nil end
+        local unit, best = direction / length, nil
+        local excluded = params and params.FilterDescendantsInstances or {}
+        local filterType = params and params.FilterType or "Exclude"
+        local function blocked(part)
+            for _, item in ipairs(excluded) do
+                if _isDescendantOf(part, item) then return filterType ~= "Include" end
+            end
+            return filterType == "Include"
+        end
+        local function visit(node)
+            if node:IsA("BasePart") and not blocked(node) and node.CanCollide ~= false then
+                local center = node.Position or (node.CFrame and node.CFrame.Position) or Vector3.new(0, 0, 0)
+                local size = node.Size or Vector3.new(1, 1, 1)
+                local distance, position, normal = _rayAabb(origin, unit, length, center, size)
+                if distance and (not best or distance < best.Distance) then
+                    best = {Instance=node, Position=position, Distance=distance, Normal=normal, Material=node.Material or Enum.Material.Plastic, __type="RaycastResult"}
+                end
+            end
+            for _, child in ipairs(node._children or {}) do visit(child) end
+        end
+        visit(self)
+        return best
+    end
 end
 
 -- VirtualInputManager / VirtualUser
