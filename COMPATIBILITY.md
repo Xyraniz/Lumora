@@ -130,6 +130,7 @@ This matrix documents the implementation status of each area of the Roblox API e
 | `isfile` / `isfolder` / `makefolder` | ✅ | Virtual directories created in memory. |
 | `delfile` / `delfolder` / `listfiles` | ✅ | Deterministic deletion and listing of virtual entries. |
 | `loadfile` | ✅ | Compiles from the virtual filesystem and uses the logical name as the chunk name. |
+| `require("@lumora/fs")` | ✅ | Lumora-native virtual filesystem module with `readFile`, `writeFile`, `appendFile`, `readDir`, `metadata`, `isFile`, `isDir`, recursive `copy`, `move`, and `remove`. It never accesses the host filesystem. |
 | `HttpService:JSONEncode` / `JSONDecode` | ✅ | Native JSON codec with arrays/objects, escapes, depth limits and cycle detection. |
 | `json.encode` / `json.decode` | ✅ | Stateless aliases for `HttpService`'s codec. |
 

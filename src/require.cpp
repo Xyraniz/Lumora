@@ -133,6 +133,8 @@ static int luneProcessExit(lua_State* L)
 static const char* embeddedModule(const char* name)
 {
     if (!name) return nullptr;
+    if (strcmp(name, "@lumora/fs") == 0)
+        return "return lumora.fs\n";
     if (strcmp(name, "@lune/fs") == 0)
         return "local h=__lumora_lune; return {readFile=h.readFile,writeFile=h.writeFile,exists=h.exists,readDir=h.readDir,makeDir=h.makeDir,remove=h.remove,move=function(a,b) local d=h.readFile(a); h.writeFile(b,d); h.remove(a) end,copy=function(a,b) h.writeFile(b,h.readFile(a)) end,isFile=function(p) return h.exists(p) and true or false end,isDir=function(p) return h.exists(p) and true or false end} \n";
     if (strcmp(name, "@lune/stdio") == 0)
@@ -158,7 +160,14 @@ static int embeddedRequire(lua_State* L)
     if (embeddedModule(name))
     {
         lua_newtable(L); const int module = lua_gettop(L);
-        if (strcmp(name, "@lune/fs") == 0)
+        if (strcmp(name, "@lumora/fs") == 0)
+        {
+            lua_getglobal(L, "lumora"); lua_getfield(L, -1, "fs");
+            const char* fields[] = {"readFile", "writeFile", "appendFile", "readDir", "writeDir", "makeDir", "removeFile", "removeDir", "remove", "isFile", "isDir", "metadata", "copy", "move", nullptr};
+            for (int i = 0; fields[i]; ++i) { lua_getfield(L, -1, fields[i]); lua_setfield(L, module, fields[i]); }
+            lua_pop(L, 2);
+        }
+        else if (strcmp(name, "@lune/fs") == 0)
         {
             const char* fields[] = {"readFile", "writeFile", "exists", "readDir", "makeDir", "remove", nullptr};
             for (int i = 0; fields[i]; ++i) copyHostField(L, module, fields[i]);

@@ -648,6 +648,63 @@ appendfile = function(path, content)
     path = _normalizePath(path); _validateParent(path)
     _files[path] = (_files[path] or "") .. tostring(content or "")
 end
+local function _fsReadDir(path)
+    local normalized = path or ""
+    if normalized ~= "" then normalized = _normalizePath(normalized) end
+    local prefix = normalized == "" and "" or normalized .. "/"
+    local result, seen = {}, {}
+    local function add(name)
+        if name and not seen[name] then seen[name] = true; table.insert(result, name) end
+    end
+    for file in pairs(_files) do
+        if file:sub(1, #prefix) == prefix then add(file:sub(#prefix + 1):match("^[^/]+")) end
+    end
+    for folder in pairs(_folders) do
+        if folder ~= "" and folder:sub(1, #prefix) == prefix then add(folder:sub(#prefix + 1):match("^[^/]+")) end
+    end
+    table.sort(result)
+    return result
+end
+local function _fsMetadata(path)
+    local normalized = _normalizePath(path)
+    if _files[normalized] ~= nil then
+        return { exists = true, isFile = true, isDir = false, size = #_files[normalized] }
+    end
+    if _folders[normalized] then return { exists = true, isFile = false, isDir = true, size = 0 } end
+    return { exists = false, isFile = false, isDir = false, size = 0 }
+end
+local function _fsCopy(from, to)
+    from, to = _normalizePath(from), _normalizePath(to)
+    if _files[from] ~= nil then _validateParent(to); _files[to] = _files[from]; return end
+    assert(_folders[from], "path does not exist: " .. from)
+    _ensureFolders(to)
+    local prefix = from .. "/"
+    for file, content in pairs(_files) do
+        if file:sub(1, #prefix) == prefix then
+            local destination = to .. "/" .. file:sub(#prefix + 1)
+            _validateParent(destination); _files[destination] = content
+        end
+    end
+end
+local function _fsMove(from, to)
+    from, to = _normalizePath(from), _normalizePath(to)
+    _fsCopy(from, to)
+    if _files[from] ~= nil then _files[from] = nil else delfolder(from) end
+end
+local function _fsRemove(path)
+    local normalized = _normalizePath(path)
+    if _files[normalized] ~= nil then _files[normalized] = nil; return end
+    if _folders[normalized] then delfolder(normalized); return end
+    error("path does not exist: " .. normalized)
+end
+lumora = lumora or {}
+lumora.fs = {
+    readFile = readfile, writeFile = writefile, appendFile = appendfile,
+    readDir = _fsReadDir, writeDir = makefolder, makeDir = makefolder,
+    removeFile = delfile, removeDir = delfolder, remove = _fsRemove,
+    isFile = isfile, isDir = isfolder, metadata = _fsMetadata,
+    copy = _fsCopy, move = _fsMove
+}
 loadfile = function(path)
     path = _normalizePath(path)
     return loadstring(readfile(path), "@" .. path)
