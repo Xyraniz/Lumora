@@ -58,6 +58,17 @@ assert(math.abs(rot.LookVector.Magnitude - 1) < 1e-9, "CFrame LookVector should 
 assert(math.abs(rot.RightVector.Magnitude - 1) < 1e-9, "CFrame RightVector should be unit")
 assert(math.abs(rot.UpVector.Magnitude - 1) < 1e-9, "CFrame UpVector should be unit")
 
+-- Euler extraction must be the inverse of CFrame.Angles for ordinary rotations.
+local roll, pitch, yaw = 0.2, -0.35, 0.6
+local oriented = CFrame.Angles(roll, pitch, yaw)
+local ex, ey, ez = oriented:ToEulerAnglesXYZ()
+assert(math.abs(ex - roll) < 1e-6, "CFrame ToEulerAnglesXYZ X")
+assert(math.abs(ey - pitch) < 1e-6, "CFrame ToEulerAnglesXYZ Y")
+assert(math.abs(ez - yaw) < 1e-6, "CFrame ToEulerAnglesXYZ Z")
+local ox, oy, oz = oriented:ToOrientation()
+assert(math.abs(ox - roll) < 1e-6 and math.abs(oy - pitch) < 1e-6 and math.abs(oz - yaw) < 1e-6,
+    "CFrame ToOrientation should match XYZ extraction")
+
 -- PointToObjectSpace / PointToWorldSpace
 local origin = CFrame.new(100, 200, 300)
 local worldPoint = Vector3.new(101, 202, 303)
@@ -113,5 +124,14 @@ assert(math.abs(uv.Magnitude - 1) < 1e-6, "Random NextUnitVector should be unit"
 -- Determinism: same seed -> same sequence
 local rng2 = Random.new(12345)
 assert(rng2:NextInteger(1, 100) == n1, "Random should be deterministic with same seed")
+
+-- VirtualUser input is observable through UserInputService in headless mode.
+local inputService = game:GetService("UserInputService")
+local inputSeen = false
+inputService.InputBegan:Connect(function(input)
+    inputSeen = input.UserInputType == Enum.UserInputType.MouseButton1
+end)
+game:GetService("VirtualUser"):Button1Down(12, 34)
+assert(inputSeen, "VirtualUser Button1Down should fire InputBegan")
 
 print("properties-contract-ok")

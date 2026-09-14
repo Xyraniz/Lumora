@@ -146,24 +146,24 @@ This matrix documents the implementation status of each area of the Roblox API e
 
 ## Native visual laboratory
 
-| Área | Status | Notes |
+| Area | Status | Notes |
 | --- | --- | --- |
 | `lumora --visual script.lua` | ✅ | Runs the same Luau prelude inside an SDL2 window and preserves headless mode unchanged. |
-| Mundo 3D | ✅ | Floor, test walls, first-person camera and deterministic 3D projection. |
-| Entrada y ciclo | ✅ | WASD moves the camera, mouse rotates view, `Esc` closes, `F` toggles selection and each frame fires `Heartbeat`/`RenderStepped`. |
-| Jugadores simulados | ✅ | Players and characters come from the real tree created by Luau; their positions are projected and rendered. |
+| 3D world | ✅ | Floor, test walls, first-person camera and deterministic 3D projection. |
+| Input and loop | ✅ | WASD moves the camera, mouse rotates view, `Esc` closes, `F` toggles selection and each frame fires `Heartbeat`/`RenderStepped`. |
+| Simulated players | ✅ | Players and characters come from the real tree created by Luau; their positions are projected and rendered. |
 | `Highlight` | ✅ | The renderer detects enabled `Highlight` instances under each character and draws box, color and ESP line. |
 | `Drawing.Line`/`Drawing.Text` | ✅ | Objects created by Luau are queried each frame and drawn on screen. |
-| Oclusión y selección | ✅ | Test walls block ESP lines and the selector ignores occluded targets. |
-| `BillboardGui`/texto | 🟡 | Player labels render as native HUD; the complete Roblox layout is not yet reproduced. |
+| Occlusion and selection | ✅ | Test walls block ESP lines and the selector ignores occluded targets. |
+| `BillboardGui`/text | 🟡 | Player labels render as native HUD; the complete Roblox layout is not yet reproduced. |
 | Roblox physics | 🔴 | The lab uses camera movement, occlusion and deterministic positions; it does not attempt to substitute Roblox's full physics engine. |
 
 ## UI fidelity
 
-| Área | Status | Notes |
+| Area | Status | Notes |
 | --- | --- | --- |
-| Texto | ✅ | SDL_ttf with locally rasterized font and real metrics; not drawn as blocks. |
-| Alfa y esquinas | ✅ | Per-pixel transparency and `UICorner` approximated via native geometry. |
+| Text | ✅ | SDL_ttf with locally rasterized font and real metrics; not drawn as blocks. |
+| Alpha and corners | ✅ | Per-pixel transparency and `UICorner` approximated via native geometry. |
 | Layout `UDim2` | ✅ | Scales and offsets are resolved against the visual viewport of 1280×720. |
 | Assets `rbxassetid://` | 🔴 | Textures are not fabricated: they require a compatible local file; Roblox does not provide those assets to the lab. |
 | Pixel-perfect parity | 🔴 | Not technically guaranteed outside Roblox's compositor, fonts, atlas and rasterizer. |

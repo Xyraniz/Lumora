@@ -158,8 +158,8 @@ The `examples/` directory contains ready-to-run scripts demonstrating the main c
 ./bin/lumora examples/datatypes.lua       # Vector3, CFrame, Color3, UDim2
 ./bin/lumora examples/instance_tree.lua   # Hierarchy, parenting, and signals
 ./bin/lumora --json examples/json_pipeline.lua  # Structured output for CI
-./bin/lumora --visual examples/visual_lab.lua    # Mundo 3D, WASD, ESP y selección de objetivo
-./bin/lumora --visual examples/attached_library.lua # Librería UI adjunta completa
+./bin/lumora --visual examples/visual_lab.lua    # 3D world, WASD, ESP and target selection
+./bin/lumora --visual examples/attached_library.lua # complete attached UI library
 ```
 
 ### Visual lab
@@ -230,13 +230,13 @@ The execution flow is intentionally simple:
 script.lua / script.luau
         │
         ▼
-CLI de Lumora ──► compilador Luau ──► VM Luau
+Lumora CLI ──► Luau compiler ──► VM Luau
         │                              │
         │                              ├─ Prelude Roblox headless
-        │                              ├─ Scheduler cooperativo
-        │                              └─ Timeout / interrupción
+        │                              ├─ Cooperative scheduler
+        │                              └─ Timeout / interrupt
         ▼
-stdout, stderr, código de salida o resultado JSON
+stdout, stderr, exit code o resultado JSON
 ```
 
 ## Tests

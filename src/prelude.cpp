@@ -827,8 +827,29 @@ local function cframe(x,y,z,r00,r01,r02,r10,r11,r12,r20,r21,r22)
                                        cf.R2[1]*v.X + cf.R2[2]*v.Y + cf.R2[3]*v.Z)
                 end
             end
-            if key == "ToEulerAnglesXYZ" then return function(cf) return 0, 0, 0 end end
-            if key == "ToOrientation" then return function(cf) return 0, 0, 0 end end
+            if key == "ToEulerAnglesXYZ" or key == "ToOrientation" then
+                return function(cf)
+                    -- Invert the matrix produced by CFrame.Angles(x, y, z).
+                    -- Clamp the asin input to absorb composition round-off.
+                    local function atan2(y, x)
+                        if x > 0 then return math.atan(y / x) end
+                        if x < 0 and y >= 0 then return math.atan(y / x) + math.pi end
+                        if x < 0 and y < 0 then return math.atan(y / x) - math.pi end
+                        if y > 0 then return math.pi / 2 end
+                        if y < 0 then return -math.pi / 2 end
+                        return 0
+                    end
+                    local sy = math.max(-1, math.min(1, cf.R0[3]))
+                    local y = math.asin(sy)
+                    local cy = math.cos(y)
+                    if math.abs(cy) > 1e-7 then
+                        return atan2(-cf.R1[3], cf.R2[3]), y,
+                            atan2(-cf.R0[2], cf.R0[1])
+                    end
+                    -- At gimbal lock, use a stable representation with z=0.
+                    return atan2(cf.R2[1], cf.R1[1]), y, 0
+                end
+            end
             return nil
         end,
     })
@@ -1965,12 +1986,22 @@ do
     function vi:SendMouseWheelEvent(x, y, scroll, sync) self.InputChanged:Fire({Position=Vector2.new(x,y), Delta=Vector3.new(0,scroll,0), UserInputType=Enum.UserInputType.MouseWheel}) end
 
     local vu = game:GetService("VirtualUser")
-    function vu:Button1Down(x, y, camera) end
-    function vu:Button1Up(x, y, camera) end
-    function vu:Button2Down(x, y, camera) end
-    function vu:Button2Up(x, y, camera) end
-    function vu:MoveCamera(cam, cframe, hitCFrame, sync) end
-    function vu:CaptureFrame() end
+    local function fireMouse(button, isDown, x, y)
+        local uis = game:GetService("UserInputService")
+        local input = {Position=Vector2.new(x or 0, y or 0), UserInputType=button,
+                       State=isDown and "Begin" or "End"}
+        (isDown and uis.InputBegan or uis.InputEnded):Fire(input)
+        return input
+    end
+    function vu:Button1Down(x, y, camera) return fireMouse(Enum.UserInputType.MouseButton1, true, x, y) end
+    function vu:Button1Up(x, y, camera) return fireMouse(Enum.UserInputType.MouseButton1, false, x, y) end
+    function vu:Button2Down(x, y, camera) return fireMouse(Enum.UserInputType.MouseButton2, true, x, y) end
+    function vu:Button2Up(x, y, camera) return fireMouse(Enum.UserInputType.MouseButton2, false, x, y) end
+    function vu:MoveCamera(cam, cframe, hitCFrame, sync)
+        if cam and cframe then cam.CFrame = cframe end
+        return true
+    end
+    function vu:CaptureFrame() return true end
 end
 
 -- ContextActionService
