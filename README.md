@@ -216,7 +216,9 @@ lumora report suspicious.luau --json
 lumora deobfuscate suspicious.luau --out analysis-output
 ```
 
-The deobfuscation command writes `00-original.luau`, `01-strings-decoded.luau`, `02-constants-folded.luau`, `03-symbols-renamed.luau`, `04-reconstructed.luau`, `diff.json` and `report.json`. Transformations are conservative: dynamic code is reported, not executed automatically; external network and host filesystem access remain disabled by the runtime policy. The report records recovered strings, capability findings, function calls, recursively resolved local modules and circular dependencies.
+The deobfuscation command writes `00-original.luau`, `01-strings-decoded.luau`, `02-constants-folded.luau`, `03-symbols-renamed.luau`, `04-reconstructed.luau`, `diff.json` and `report.json`. Transformations are conservative: dynamic code is reported, not executed automatically; external network and host filesystem access remain disabled by the runtime policy. The report records recovered strings, capability findings, function calls, recursively resolved local modules and circular dependencies. `decodedStrings` contains printable recovered text, `decodedBytesHex` contains non-printable byte sequences as hexadecimal, and `recoveredConstants` contains numeric constant-folding results; these categories are not mixed.
+
+For an explicit dynamic check, reuse the existing runtime policy with `lumora --sandbox --json --timeout 2 script.luau`. The analyzer does not silently execute protected code. `--sandbox` is a surface-reduction layer, not a complete OS security boundary; unknown-origin code should additionally run inside a container or VM.
 
 ### Player simulation for ESP tests
 

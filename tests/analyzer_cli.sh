@@ -17,6 +17,9 @@ import json, sys
 r=json.load(open(sys.argv[1]))
 assert r['summary']['functions'] == 1
 assert 'AB' in r['decodedStrings']
+assert isinstance(r['decodedBytesHex'], list)
+assert isinstance(r['recoveredConstants'], list)
+assert len(r['recoveredConstants']) >= 1
 assert any(x['category'] == 'network' for x in r['findings'])
 assert isinstance(r['hasCycle'], bool)
 PY

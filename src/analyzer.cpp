@@ -23,7 +23,9 @@ struct ModuleInfo { std::string path; std::string source; std::vector<std::strin
 struct Result {
     std::string original, strings, constants, normalized, reconstructed;
     std::vector<Finding> findings;
-    std::vector<std::string> decoded;
+    std::vector<std::string> decodedStrings;
+    std::vector<std::string> decodedBytes;
+    std::vector<std::string> recoveredConstants;
     std::vector<std::pair<std::string,std::string>> edges;
     std::vector<FunctionInfo> functions;
     std::vector<ModuleInfo> modules;
@@ -38,6 +40,8 @@ std::string trim(std::string s) { size_t a=0,b=s.size(); while(a<b&&std::isspace
 std::string json(const std::string& s) { return jsonEscape(s); }
 std::string luaQuote(const std::string& s) { std::string out="\""; for(unsigned char c:s){if(c=='\\'||c=='\"')out+='\\'; if(c=='\n')out+="\\n"; else if(c=='\r')out+="\\r"; else if(c=='\t')out+="\\t"; else if(c<32){char buf[5];std::snprintf(buf,sizeof(buf),"\\%03u",unsigned(c));out+=buf;} else out+=char(c);} return out+"\""; }
 std::string array(const std::vector<std::string>& v) { std::string o="["; for(size_t i=0;i<v.size();++i){if(i)o+=",";o+=json(v[i]);}return o+"]"; }
+std::string hexBytes(const std::string& value) { static const char* digits="0123456789abcdef"; std::string out; for(unsigned char c:value){out+=digits[c>>4];out+=digits[c&15];} return out; }
+bool printable(const std::string& value) { for(unsigned char c:value) if(c<32 || c>126) return false; return !value.empty(); }
 std::string diffJson(const std::string& before, const std::string& after) {
     auto lines=[](const std::string& s){std::vector<std::string> v;std::stringstream ss(s);std::string x;while(std::getline(ss,x))v.push_back(x);return v;};
     const auto a=lines(before), b=lines(after); size_t common=0; for(size_t i=0;i<std::min(a.size(),b.size());++i) if(a[i]==b[i]) ++common;
@@ -55,23 +59,23 @@ double evalSimple(const std::string& expression, bool& ok) {
     double value=expr(); ok=ok&&pos==s.size(); return value;
 }
 
-std::string decodeStrings(const std::string& input, std::vector<std::string>& decoded) {
+std::string decodeStrings(const std::string& input, std::vector<std::string>& decodedStrings, std::vector<std::string>& decodedBytes) {
     std::string out=input;
     std::regex chars(R"(string\.char\s*\(([^\)]*)\))");
     std::smatch m; std::string result; std::string::const_iterator searchStart=out.cbegin();
     while(std::regex_search(searchStart,out.cend(),m,chars)) {
         result.append(searchStart,m[0].first); std::stringstream ss(m[1].str()); std::string part, value; bool valid=true;
         while(std::getline(ss,part,',')){bool ok=true;double n=evalSimple(trim(part),ok);if(!ok||n<0||n>255){valid=false;break;}value.push_back(char(int(n)));}
-        if(valid&&!value.empty()){decoded.push_back(value);result+=luaQuote(value);}
+        if(valid&&!value.empty()){if(printable(value)) decodedStrings.push_back(value); else decodedBytes.push_back(hexBytes(value));result+=luaQuote(value);}
         else result+=m[0].str(); searchStart=m[0].second;
     }
     result.append(searchStart,out.cend());
     return result;
 }
 
-std::string foldConstants(const std::string& input, std::vector<std::string>& decoded) {
+std::string foldConstants(const std::string& input, std::vector<std::string>& recoveredConstants) {
     std::string out=input; std::regex expr(R"(\(?\s*[0-9]+(?:\s*[+\-*/]\s*[0-9]+)+\s*\)?)"); std::smatch m; std::string result; auto it=out.cbegin();
-    while(std::regex_search(it,out.cend(),m,expr)){result.append(it,m[0].first);bool ok=true;double n=evalSimple(m[0].str(),ok);if(ok&&std::isfinite(n)){std::ostringstream v;v<<((n==int(n))?std::to_string(int(n)):std::to_string(n));result+=v.str();decoded.push_back(v.str());}else result+=m[0].str();it=m[0].second;} result.append(it,out.cend()); return result;
+    while(std::regex_search(it,out.cend(),m,expr)){result.append(it,m[0].first);bool ok=true;double n=evalSimple(m[0].str(),ok);if(ok&&std::isfinite(n)){std::ostringstream v;v<<((n==int(n))?std::to_string(int(n)):std::to_string(n));result+=v.str();recoveredConstants.push_back(v.str());}else result+=m[0].str();it=m[0].second;} result.append(it,out.cend()); return result;
 }
 
 std::string renameSymbols(const std::string& input) {
@@ -80,9 +84,9 @@ std::string renameSymbols(const std::string& input) {
     for(const auto& p:names){std::regex word("\\b"+p.first+"\\b");out=std::regex_replace(out,word,p.second);} return out;
 }
 
-std::string decodeTableConcat(const std::string& input, std::vector<std::string>& decoded) {
+std::string decodeTableConcat(const std::string& input, std::vector<std::string>& decodedStrings) {
     std::regex table(R"(table\.concat\s*\(\s*\{\s*((?:"[^"]*"\s*,?\s*)+)\}\s*\))"); std::string out; std::smatch m; auto it=input.cbegin();
-    while(std::regex_search(it,input.cend(),m,table)){out.append(it,m[0].first);std::string joined;std::regex item("\\\"([^\\\"]*)\\\"");for(std::sregex_iterator i(m[1].first,m[1].second,item),e;i!=e;++i)joined+=(*i)[1].str();decoded.push_back(joined);out+=luaQuote(joined);it=m[0].second;}out.append(it,input.cend());return out;
+    while(std::regex_search(it,input.cend(),m,table)){out.append(it,m[0].first);std::string joined;std::regex item("\\\"([^\\\"]*)\\\"");for(std::sregex_iterator i(m[1].first,m[1].second,item),e;i!=e;++i)joined+=(*i)[1].str();decodedStrings.push_back(joined);out+=luaQuote(joined);it=m[0].second;}out.append(it,input.cend());return out;
 }
 
 void collectFindings(Result& r) {
@@ -102,14 +106,14 @@ void cycles(Result& r){std::map<std::string,std::vector<std::string>> a;for(cons
 
 std::string reportJson(const Result& r) {
     std::string o="{\"summary\":{";o+="\"input\":"+json(r.original.substr(0,std::min<size_t>(80,r.original.size())))+",\"functions\":"+std::to_string(r.functions.size())+",\"modules\":"+std::to_string(r.modules.size())+",\"cycles\":"+std::to_string(r.cycles.size())+"},\"findings\":[";
-    for(size_t i=0;i<r.findings.size();++i){if(i)o+=",";const auto&f=r.findings[i];o+="{\"category\":"+json(f.category)+",\"pattern\":"+json(f.pattern)+",\"evidence\":"+json(f.evidence)+",\"line\":"+std::to_string(f.line)+"}";}o+="] ,\"decodedStrings\":"+array(r.decoded)+",\"functions\":[";
+    for(size_t i=0;i<r.findings.size();++i){if(i)o+=",";const auto&f=r.findings[i];o+="{\"category\":"+json(f.category)+",\"pattern\":"+json(f.pattern)+",\"evidence\":"+json(f.evidence)+",\"line\":"+std::to_string(f.line)+"}";}o+="] ,\"decodedStrings\":"+array(r.decodedStrings)+",\"decodedBytesHex\":"+array(r.decodedBytes)+",\"recoveredConstants\":"+array(r.recoveredConstants)+",\"functions\":[";
     for(size_t i=0;i<r.functions.size();++i){if(i)o+=",";o+="{\"name\":"+json(r.functions[i].name)+",\"line\":"+std::to_string(r.functions[i].line)+",\"calls\":"+array(std::vector<std::string>(r.functions[i].calls.begin(),r.functions[i].calls.end()))+"}";}o+="] ,\"edges\":[";
     for(size_t i=0;i<r.edges.size();++i){if(i)o+=",";o+="{\"from\":"+json(r.edges[i].first)+",\"to\":"+json(r.edges[i].second)+"}";}o+="] ,\"moduleEdges\":[";
     for(const auto&m:r.modules)for(const auto&t:m.requires){if(o.back()!='[')o+=",";o+="{\"from\":"+json(m.path)+",\"to\":"+json(t)+"}";}o+="] ,\"hasCycle\":";o+=(r.cycles.empty()?"false":"true");o+=",\"cycles\":[";
     for(size_t i=0;i<r.cycles.size();++i){if(i)o+=",";o+=array(r.cycles[i]);}return o+"]}";
 }
 
-Result analyze(const std::string& path){Result r;r.original=readText(path);r.strings=decodeStrings(r.original,r.decoded);r.strings=decodeTableConcat(r.strings,r.decoded);r.constants=foldConstants(r.strings,r.decoded);r.normalized=renameSymbols(r.constants);r.reconstructed=r.normalized;collectFindings(r);collectFunctions(r);std::set<std::string> seen;collectModules(r,path,seen);cycles(r);return r;}
+Result analyze(const std::string& path){Result r;r.original=readText(path);r.strings=decodeStrings(r.original,r.decodedStrings,r.decodedBytes);r.strings=decodeTableConcat(r.strings,r.decodedStrings);r.constants=foldConstants(r.strings,r.recoveredConstants);r.normalized=renameSymbols(r.constants);r.reconstructed=r.normalized;collectFindings(r);collectFunctions(r);std::set<std::string> seen;collectModules(r,path,seen);cycles(r);return r;}
 }
 
 void printAnalyzerHelp(){std::cout<<"usage: lumora <inspect|deobfuscate|report> input.lua [--out directory] [--json]\n";}
