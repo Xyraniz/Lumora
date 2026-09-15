@@ -6,9 +6,11 @@
 - Real embedded `@lune/fs` operations for `isFile`, `isDir`, recursive `copy`, and filesystem `move`; these use Lumora's own host implementation and do not depend on Lune at runtime.
 - Real embedded `@lune/process.exec`, including shell-safe argument quoting, captured combined output, exit code, and an explicit success flag.
 - Contract coverage for file type checks, copy/move behavior, and successful process execution.
+- Split the embedded Roblox prelude into responsibility-focused fragments: core runtime, WindUI, icons, and services.
 
 ### Changed
 - Expanded the standalone compatibility documentation to distinguish implemented local operations from unavailable network and Roblox-client capabilities.
+- Kept the prelude fragments as adjacent raw string literals, preserving the original initialization order and exact 99,438-byte Lua payload.
 - Kept all unsupported external behavior explicit; no fake responses or placeholder success paths were introduced.
 
 ## [0.5.0] — Runtime expansion
