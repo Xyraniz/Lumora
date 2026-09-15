@@ -374,6 +374,15 @@ tasklib._maxCycles = 50
 tasklib._cycleCount = 0
 tasklib._errors = {}
 tasklib._now = 0
+tasklib._trace = {}
+tasklib._traceEnabled = true
+
+local function traceTask(event, co, record, detail)
+    if not tasklib._traceEnabled then return end
+    table.insert(tasklib._trace, { event = event, time = tasklib._now,
+        cycle = tasklib._cycleCount, thread = tostring(co),
+        wakeAt = record and record.wakeAt or tasklib._now, detail = detail or "" })
+end
 
 local function rememberTaskError(err)
     table.insert(tasklib._errors, tostring(err))
@@ -402,11 +411,13 @@ local function resumeTask(co, record, resumeArgs)
     local args = resumeArgs or record.args or table.pack()
     local ok, yielded = coroutine.resume(co, table.unpack(args, 1, args.n))
     if not ok then
+        traceTask("error", co, record, tostring(yielded))
         rememberTaskError(yielded)
         tasklib._threads[co] = nil
         return false
     end
     if coroutine.status(co) == "dead" then
+        traceTask("complete", co, record)
         tasklib._threads[co] = nil
         return true
     end
@@ -418,6 +429,7 @@ local function resumeTask(co, record, resumeArgs)
     record.wakeAt = tasklib._now + duration
     record.readyCycle = tasklib._cycleCount + 1
     record.waiting = true
+    traceTask("yield", co, record, tostring(duration))
     return true
 end
 
@@ -425,6 +437,7 @@ function tasklib.spawn(fn, ...)
     local co = makeTaskThread(fn)
     local record = { args = table.pack(...), wakeAt = tasklib._now, readyCycle = tasklib._cycleCount, waiting = false }
     tasklib._threads[co] = record
+    traceTask("spawn", co, record)
     resumeTask(co, record)
     return co
 end
@@ -432,6 +445,7 @@ end
 function tasklib.defer(fn, ...)
     local co = makeTaskThread(fn)
     enqueue(co, table.pack(...), tasklib._now, tasklib._cycleCount + 1)
+    traceTask("defer", co, tasklib._threads[co])
     -- At top level there is no host frame that will naturally advance the
     -- cooperative loop, so perform exactly one zero-time scheduler turn.
     -- Inside a running task, the readyCycle boundary preserves next-cycle
@@ -444,6 +458,7 @@ function tasklib.delay(seconds, fn, ...)
     assert(type(seconds) == "number", "task.delay expects seconds as a number")
     local co = makeTaskThread(fn)
     enqueue(co, table.pack(...), tasklib._now + math.max(0, seconds), tasklib._cycleCount)
+    traceTask("delay", co, tasklib._threads[co], tostring(seconds))
     return co
 end
 
@@ -475,6 +490,7 @@ function tasklib.cancel(co)
     assert(type(co) == "thread", "task.cancel expects a thread")
     local record = tasklib._threads[co]
     if record then
+        traceTask("cancel", co, record)
         tasklib._threads[co] = nil
         pcall(coroutine.close, co)
     end
@@ -531,6 +547,17 @@ function tasklib._runScheduler()
     tasklib._errors = {}
     return #errors == 0, errors
 end
+
+function tasklib.trace(enabled)
+    if enabled ~= nil then tasklib._traceEnabled = not not enabled end
+    return tasklib._traceEnabled
+end
+function tasklib.traceEvents(clear)
+    local result = tasklib._trace
+    if clear then tasklib._trace = {} end
+    return result
+end
+function tasklib.clearTrace() tasklib._trace = {} end
 
  task = tasklib
 
@@ -760,6 +787,24 @@ lumora.fs = {
     isFile = isfile, isDir = isfolder, metadata = _fsMetadata,
     copy = _fsCopy, move = _fsMove
 }
+function lumora.fs.snapshot()
+    local result = { files = {}, folders = {} }
+    for path, content in pairs(_files) do result.files[path] = content end
+    for path, present in pairs(_folders) do if present then result.folders[path] = true end end
+    return result
+end
+function lumora.fs.diff(before, after)
+    assert(type(before) == "table" and type(after) == "table", "snapshots must be tables")
+    local result = { added = {}, removed = {}, changed = {} }
+    local oldFiles, newFiles = before.files or {}, after.files or {}
+    for path, content in pairs(newFiles) do
+        if oldFiles[path] == nil then table.insert(result.added, path)
+        elseif oldFiles[path] ~= content then table.insert(result.changed, path) end
+    end
+    for path in pairs(oldFiles) do if newFiles[path] == nil then table.insert(result.removed, path) end end
+    table.sort(result.added); table.sort(result.removed); table.sort(result.changed)
+    return result
+end
 loadfile = function(path)
     path = _normalizePath(path)
     return loadstring(readfile(path), "@" .. path)

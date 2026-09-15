@@ -25,7 +25,9 @@ void registerRobloxGlobals(lua_State* L);
 
 // host_api.cpp
 void registerHostGlobals(lua_State* L);
-void registerEmbeddedLuneHost(lua_State* L);
+void registerEmbeddedHost(lua_State* L);
+void registerAnalysisGlobals(lua_State* L);
+void registerEmbeddedAnalysisModules(lua_State* L);
 
 // json.cpp
 void registerJsonGlobals(lua_State* L);

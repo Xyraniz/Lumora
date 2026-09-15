@@ -200,6 +200,14 @@ The following table summarizes the API covered by the current prelude. Compatibi
 
 The implementation is maintained in an isolated prelude at `src/prelude.cpp` (with native C closures) and execution utilities in `src/runtime.cpp`. This design allows expanding the compatibility surface without modifying the vendored VM or coupling it to a graphical client. Exact parity with a specific Roblox version should be validated using golden vectors for that version; Lumora prioritizes the observable compatibility required by its tests and pipelines.
 
+### Analysis and observability APIs
+
+Lumora includes dependency-free analysis primitives designed for reproducible inspection of generated or unknown Luau. `require("@lumora/regex")` provides ECMAScript regular-expression matching, capture groups, replacement and splitting. `require("@lumora/analysis")` provides `scan(source)` for capability-sensitive findings and `graph(source)` for function, call and module edges. The results are ordinary Luau tables and can be serialized through the existing JSON helpers.
+
+The virtual filesystem supports `lumora.fs.snapshot()` and `lumora.fs.diff(before, after)`. Snapshots contain deterministic file contents and folders; diffs report sorted `added`, `removed` and `changed` paths, which makes every transformation stage auditable. The cooperative scheduler exposes `task.trace(true|false)`, `task.traceEvents(clear)` and `task.clearTrace()`. Events include task creation, delay, yield, completion, cancellation and errors, together with virtual time, cycle and wake deadline.
+
+The `lumora.capabilities()` result explicitly reports `analysis`, the dynamic-code policy, and process policy. These facilities do not grant network access or Roblox-client access: unavailable external behavior remains blocked and observable. They are intended to provide structured evidence to a human or another model rather than claim that a reconstructed script is identical to its original source.
+
 ### Player simulation for ESP tests
 
 To validate visual logic reproducibly, the prelude exposes `lumora.simulatePlayers(specs)`. It creates synthetic players and characters with `Head` and `HumanoidRootPart`, and fires `Players.PlayerAdded`; `lumora.resetSimulatedPlayers()` clears that state. `Highlight`, `BillboardGui` and `Drawing` are headless-observable objects: they allow asserting that an ESP is created, targets the correct character and is enabled, but do not draw or interact with a real client. The executable contract lives in `tests/simulated_players_esp.lua`.
@@ -330,9 +338,9 @@ Lumora is distributed under the [MIT license](LICENSE). Vendored Luau sources re
 ## References
 
 [1]: https://luau.org "Luau"
-[2]: https://github.com/lune-org/lune "Lune — standalone Luau runtime"
+[2]: https://github.com/runtime-org/runtime "upstream runtime — standalone Luau runtime"
 [3]: https://github.com/luau-lang/lute "Lute — standalone Luau runtime for general-purpose programming"
 
-## Standalone compatibility with Lune runners
+## Standalone compatibility with upstream runtime runners
 
-Lumora can execute runners generated for Lune’s usual contract without installing Lune or downloading modules at runtime. `lumora run script.luau` and the local launcher `bin/lune script.luau` are equivalent; both load `@lune/fs`, `@lune/luau`, `@lune/stdio` and `@lune/process` modules from the binary itself. Lumora also provides its independent `@lumora/fs` module, adapted from the useful shape of Lune’s filesystem API but implemented entirely over Lumora’s virtual memory filesystem. The embedded `@lune/fs` implementation now exposes real file/directory predicates plus recursive copy and rename, while `@lune/process.exec` executes an explicitly supplied local command and returns captured output, exit code and success state. No Lune source, repository reference or runtime dependency is used. Network and Roblox-client operations remain explicit failures rather than fabricated responses.
+Lumora can execute runners generated for upstream runtime’s usual contract without installing upstream runtime or downloading modules at runtime. `lumora run script.luau` and the local launcher `bin/runtime script.luau` are equivalent; both load `@lumora/fs`, `@lumora/luau`, `@lumora/stdio` and `@lumora/process` modules from the binary itself. Lumora also provides its independent `@lumora/fs` module, adapted from the useful shape of upstream runtime’s filesystem API but implemented entirely over Lumora’s virtual memory filesystem. The embedded `@lumora/fs` implementation now exposes real file/directory predicates plus recursive copy and rename, while `@lumora/process.exec` executes an explicitly supplied local command and returns captured output, exit code and success state. No upstream runtime source, repository reference or runtime dependency is used. Network and Roblox-client operations remain explicit failures rather than fabricated responses.

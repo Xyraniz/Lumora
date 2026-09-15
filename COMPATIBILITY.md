@@ -6,7 +6,7 @@ This matrix documents the implementation status of each area of the Roblox API e
 
 Lumora provides `@lumora/datetime`, `@lumora/serde`, `@lumora/task`, and
 `@lumora/roblox` as virtual modules implemented inside this runtime. They do
-not import Lune code or depend on the Lune repository. The APIs are covered by
+not import upstream runtime code or depend on the upstream runtime repository. The APIs are covered by
 `tests/standard_modules_contract.lua`.
 
 **Legend:**

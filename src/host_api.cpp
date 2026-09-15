@@ -99,6 +99,9 @@ int capabilities(lua_State* L)
     setBooleanField(L, table, "debug", true);
     setBooleanField(L, table, "executorHooks", false);
     setBooleanField(L, table, "robloxClient", false);
+    setBooleanField(L, table, "analysis", true);
+    setStringField(L, table, "dynamicCode", "observable");
+    setStringField(L, table, "process", "explicit");
     return 1;
 }
 
@@ -147,7 +150,7 @@ void registerFunction(lua_State* L, int table, const char* name, lua_CFunction f
     lua_setfield(L, table, name);
 }
 
-int luneReadFile(lua_State* L)
+int hostReadFile(lua_State* L)
 {
     const char* path = luaL_checkstring(L, 1);
     std::ifstream input(path, std::ios::binary);
@@ -158,7 +161,7 @@ int luneReadFile(lua_State* L)
     return 1;
 }
 
-int luneWriteFile(lua_State* L)
+int hostWriteFile(lua_State* L)
 {
     const char* path = luaL_checkstring(L, 1); size_t length = 0;
     const char* data = luaL_checklstring(L, 2, &length);
@@ -169,25 +172,25 @@ int luneWriteFile(lua_State* L)
     return 0;
 }
 
-int lunePathExists(lua_State* L)
+int hostPathExists(lua_State* L)
 {
     std::error_code error; const bool exists = std::filesystem::exists(luaL_checkstring(L, 1), error);
     lua_pushboolean(L, exists && !error); return 1;
 }
 
-int luneIsFile(lua_State* L)
+int hostIsFile(lua_State* L)
 {
     std::error_code error; const auto status = std::filesystem::status(luaL_checkstring(L, 1), error);
     lua_pushboolean(L, !error && std::filesystem::is_regular_file(status)); return 1;
 }
 
-int luneIsDir(lua_State* L)
+int hostIsDir(lua_State* L)
 {
     std::error_code error; const auto status = std::filesystem::status(luaL_checkstring(L, 1), error);
     lua_pushboolean(L, !error && std::filesystem::is_directory(status)); return 1;
 }
 
-int luneCopy(lua_State* L)
+int hostCopy(lua_State* L)
 {
     const char* source = luaL_checkstring(L, 1); const char* destination = luaL_checkstring(L, 2);
     std::error_code error; const auto status = std::filesystem::status(source, error);
@@ -200,7 +203,7 @@ int luneCopy(lua_State* L)
     return 0;
 }
 
-int luneMove(lua_State* L)
+int hostMove(lua_State* L)
 {
     const char* source = luaL_checkstring(L, 1); const char* destination = luaL_checkstring(L, 2);
     std::error_code error; std::filesystem::rename(source, destination, error);
@@ -208,7 +211,7 @@ int luneMove(lua_State* L)
     return 0;
 }
 
-int luneExec(lua_State* L)
+int hostExec(lua_State* L)
 {
     const char* program = luaL_checkstring(L, 1); std::string command = "'";
     for (const char* p = program; *p; ++p) command += (*p == '\'' ? "'\\''" : std::string(1, *p));
@@ -231,7 +234,7 @@ int luneExec(lua_State* L)
     lua_pushinteger(L, exitCode); lua_setfield(L, -2, "code"); lua_pushboolean(L, exitCode == 0); lua_setfield(L, -2, "ok"); return 1;
 }
 
-int luneReadDir(lua_State* L)
+int hostReadDir(lua_State* L)
 {
     const char* path = luaL_optstring(L, 1, "."); std::error_code error;
     lua_newtable(L); int index = 1;
@@ -243,34 +246,34 @@ int luneReadDir(lua_State* L)
     return 1;
 }
 
-int luneMakeDir(lua_State* L)
+int hostMakeDir(lua_State* L)
 {
     std::error_code error; const bool ok = std::filesystem::create_directories(luaL_checkstring(L, 1), error);
     lua_pushboolean(L, (ok || !error)); return 1;
 }
 
-int luneRemove(lua_State* L)
+int hostRemove(lua_State* L)
 {
     std::error_code error; const bool ok = std::filesystem::remove_all(luaL_checkstring(L, 1), error) > 0;
     if (error) { luaL_error(L, "could not remove path"); return 0; }
     lua_pushboolean(L, ok); return 1;
 }
 
-int luneCwd(lua_State* L)
+int hostCwd(lua_State* L)
 {
     std::error_code error; const auto path = std::filesystem::current_path(error);
     if (error) { luaL_error(L, "could not get current directory"); return 0; }
     lua_pushstring(L, path.string().c_str()); return 1;
 }
 
-int luneSetCwd(lua_State* L)
+int hostSetCwd(lua_State* L)
 {
     std::error_code error; std::filesystem::current_path(luaL_checkstring(L, 1), error);
     if (error) { luaL_error(L, "could not change current directory"); return 0; }
     return 0;
 }
 
-int luneEnv(lua_State* L)
+int hostEnv(lua_State* L)
 {
     const char* name = luaL_checkstring(L, 1); const char* value = std::getenv(name);
     if (value) lua_pushstring(L, value); else lua_pushnil(L); return 1;
@@ -299,22 +302,22 @@ void registerHostGlobals(lua_State* L)
     lua_setglobal(L, "lumora");
 }
 
-void registerEmbeddedLuneHost(lua_State* L)
+void registerEmbeddedHost(lua_State* L)
 {
     lua_newtable(L); const int api = lua_gettop(L);
-    registerFunction(L, api, "readFile", luneReadFile);
-    registerFunction(L, api, "writeFile", luneWriteFile);
-    registerFunction(L, api, "exists", lunePathExists);
-    registerFunction(L, api, "isFile", luneIsFile);
-    registerFunction(L, api, "isDir", luneIsDir);
-    registerFunction(L, api, "readDir", luneReadDir);
-    registerFunction(L, api, "makeDir", luneMakeDir);
-    registerFunction(L, api, "remove", luneRemove);
-    registerFunction(L, api, "copy", luneCopy);
-    registerFunction(L, api, "move", luneMove);
-    registerFunction(L, api, "cwd", luneCwd);
-    registerFunction(L, api, "setCwd", luneSetCwd);
-    registerFunction(L, api, "env", luneEnv);
-    registerFunction(L, api, "exec", luneExec);
-    lua_setglobal(L, "__lumora_lune");
+    registerFunction(L, api, "readFile", hostReadFile);
+    registerFunction(L, api, "writeFile", hostWriteFile);
+    registerFunction(L, api, "exists", hostPathExists);
+    registerFunction(L, api, "isFile", hostIsFile);
+    registerFunction(L, api, "isDir", hostIsDir);
+    registerFunction(L, api, "readDir", hostReadDir);
+    registerFunction(L, api, "makeDir", hostMakeDir);
+    registerFunction(L, api, "remove", hostRemove);
+    registerFunction(L, api, "copy", hostCopy);
+    registerFunction(L, api, "move", hostMove);
+    registerFunction(L, api, "cwd", hostCwd);
+    registerFunction(L, api, "setCwd", hostSetCwd);
+    registerFunction(L, api, "env", hostEnv);
+    registerFunction(L, api, "exec", hostExec);
+    lua_setglobal(L, "__lumora_host");
 }

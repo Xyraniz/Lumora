@@ -35,6 +35,7 @@ add_executable(lumora
     src/require.cpp
     src/json.cpp
     src/host_api.cpp
+    src/analysis.cpp
 )
 if(LUMORA_VISUAL_AVAILABLE)
     target_sources(lumora PRIVATE src/visual.cpp)
@@ -75,7 +76,7 @@ if(BUILD_TESTING)
     add_test(NAME require_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/require_contract.lua)
     add_test(NAME require_pure_contract COMMAND $<TARGET_FILE:lumora> --no-roblox ${CMAKE_SOURCE_DIR}/tests/require_pure_contract.lua)
     add_test(NAME lumora_fs_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/lumora_fs_contract.lua)
-    add_test(NAME lune_compat_contract COMMAND $<TARGET_FILE:lumora> run ${CMAKE_SOURCE_DIR}/tests/lune_compat_contract.lua)
+    add_test(NAME analysis_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/analysis_contract.lua)
     add_test(NAME standard_modules_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/standard_modules_contract.lua)
     add_test(NAME sandbox_require_contract COMMAND $<TARGET_FILE:lumora> --sandbox ${CMAKE_SOURCE_DIR}/tests/sandbox_require_contract.lua)
     add_test(NAME scheduler_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/scheduler_contract.lua)
@@ -93,6 +94,5 @@ if(BUILD_TESTING)
         add_test(NAME sandbox_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/sandbox_contract.sh $<TARGET_FILE:lumora>)
         add_test(NAME json_schema COMMAND ${CMAKE_SOURCE_DIR}/tests/json_schema.sh $<TARGET_FILE:lumora>)
         add_test(NAME differential_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/differential_contract.sh $<TARGET_FILE:lumora>)
-        add_test(NAME lune_compat COMMAND ${CMAKE_SOURCE_DIR}/tests/lune_compat.sh $<TARGET_FILE:lumora>)
     endif()
 endif()

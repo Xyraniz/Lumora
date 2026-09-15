@@ -3,8 +3,8 @@
 ## [0.6.0] — Independent runtime APIs
 
 ### Added
-- Real embedded `@lune/fs` operations for `isFile`, `isDir`, recursive `copy`, and filesystem `move`; these use Lumora's own host implementation and do not depend on Lune at runtime.
-- Real embedded `@lune/process.exec`, including shell-safe argument quoting, captured combined output, exit code, and an explicit success flag.
+- Real embedded `@lumora/fs` operations for `isFile`, `isDir`, recursive `copy`, and filesystem `move`; these use Lumora's own host implementation and do not depend on upstream runtime at runtime.
+- Real embedded `@lumora/process.exec`, including shell-safe argument quoting, captured combined output, exit code, and an explicit success flag.
 - Contract coverage for file type checks, copy/move behavior, and successful process execution.
 - Split the embedded Roblox prelude into responsibility-focused fragments: core runtime, WindUI, icons, and services.
 
@@ -16,7 +16,7 @@
 ## [0.5.0] — Runtime expansion
 
 ### Added
-- Independent `@lune/datetime`, `@lune/serde`, and `@lune/task` compatibility modules implemented inside Lumora without repository references.
+- Independent `@lumora/datetime`, `@lumora/serde`, and `@lumora/task` compatibility modules implemented inside Lumora without repository references.
 - Observable headless WindUI state: window lifecycle, destruction callbacks, theme and language state, localization, notifications, save/load state, icon sizing, and deterministic icon initialization.
 
 ### Changed
@@ -38,7 +38,7 @@ All notable changes to Lumora are documented in this file. The format is based o
 - Deterministic headless `Workspace:Raycast` support against axis-aligned `BasePart` bounds. Results expose `Instance`, `Position`, `Distance`, `Normal`, `Material`, and the `RaycastResult` type marker.
 - `RaycastParams.FilterDescendantsInstances` support for both `Exclude` and `Include` filtering, with `CanCollide` respected during intersection tests.
 - `tests/raycast_contract.lua`, covering nearest-hit selection, distance, surface normals, and exclusion filtering.
-- Native `@lumora/fs` module adapted from the useful API shape of Lune's filesystem standard library, implemented entirely over Lumora's in-memory virtual filesystem. It adds typed metadata, directory enumeration, recursive copy, move, remove, and file/directory predicates.
+- Native `@lumora/fs` module adapted from the useful API shape of upstream runtime's filesystem standard library, implemented entirely over Lumora's in-memory virtual filesystem. It adds typed metadata, directory enumeration, recursive copy, move, remove, and file/directory predicates.
 - `tests/lumora_fs_contract.lua`, covering virtual directories, append semantics, metadata, deterministic directory entries, recursive copy, move, and removal.
 - Functional `RunService:BindToRenderStep` and `UnbindFromRenderStep` callbacks with deterministic priority ordering, replacement by name, and visual-loop dispatch.
 - `tests/runservice_contract.lua`, covering priority order, equal-priority stability, callback execution, and unbinding.
@@ -48,15 +48,15 @@ All notable changes to Lumora are documented in this file. The format is based o
 
 ### Changed
 - `lumora.capabilities().http` now reports `disabled` instead of the misleading `stub` label.
-- The new standard-module layer is implemented inside Lumora and has no dependency on or runtime reference to the Lune repository.
+- The new standard-module layer is implemented inside Lumora and has no dependency on or runtime reference to the upstream runtime repository.
 - Repository documentation in `README.md`, `COMPATIBILITY.md`, and `CHANGELOG.md` is now written in technical English.
 - Compatibility documentation now describes the new orientation and virtual-input behavior.
 - The visual laboratory now dispatches bound render-step callbacks before `RenderStepped`, matching the expected frame lifecycle more closely.
 
 ### Fixed
-- `@lune/luau.load` now accepts the Lune-compatible second argument with an
-  `environment` table and `@lune/luau.compile` returns real Luau bytecode.
-- `@lune/process.exit` and `@lune/stdio.write` are exposed by the embedded
+- `@lumora/luau.load` now accepts the upstream runtime-compatible second argument with an
+  `environment` table and `@lumora/luau.compile` returns real Luau bytecode.
+- `@lumora/process.exit` and `@lumora/stdio.write` are exposed by the embedded
   compatibility modules.
 
 ## [0.4.0] — 2026-09-10

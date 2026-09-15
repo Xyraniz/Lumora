@@ -37,7 +37,7 @@ static void addFunction(lua_State* L, int table, const char* name, lua_CFunction
     lua_setfield(L, table, name);
 }
 
-static int luneCompile(lua_State* L)
+static int lumoraCompile(lua_State* L)
 {
     size_t size = 0;
     const char* source = luaL_checklstring(L, 1, &size);
@@ -58,7 +58,7 @@ static int luneCompile(lua_State* L)
     }
 }
 
-static int luneLoad(lua_State* L)
+static int lumoraLoad(lua_State* L)
 {
     size_t size = 0;
     const char* sourceOrBytecode = luaL_checklstring(L, 1, &size);
@@ -75,7 +75,7 @@ static int luneLoad(lua_State* L)
             bytecode = Luau::compile(std::string(sourceOrBytecode, size), options);
         }
 
-        if (luau_load(L, "=@lumora-lune-compat", bytecode.data(), bytecode.size(), 0) != 0)
+        if (luau_load(L, "=@lumora-runtime", bytecode.data(), bytecode.size(), 0) != 0)
         {
             const char* error = lua_tostring(L, -1);
             const std::string message = error ? error : "Luau load failed";
@@ -85,7 +85,7 @@ static int luneLoad(lua_State* L)
             return 2;
         }
 
-        // Lune accepts { environment = table } as the second argument. The
+        // upstream runtime accepts { environment = table } as the second argument. The
         // generated safe runners use this to keep recovered code in a closed
         // lexical environment instead of the host globals.
         const int functionIndex = lua_gettop(L);
@@ -108,7 +108,7 @@ static int luneLoad(lua_State* L)
     }
 }
 
-static int luneStdioWrite(lua_State* L)
+static int lumoraStdioWrite(lua_State* L)
 {
     const int count = lua_gettop(L);
     for (int i = 1; i <= count; ++i)
@@ -123,7 +123,7 @@ static int luneStdioWrite(lua_State* L)
     return 0;
 }
 
-static int luneProcessExit(lua_State* L)
+static int hostProcessExit(lua_State* L)
 {
     const int code = int(luaL_optinteger(L, 1, 0));
     luaL_error(L, "process.exit(%d)", code);
@@ -135,26 +135,28 @@ static const char* embeddedModule(const char* name)
     if (!name) return nullptr;
     if (strcmp(name, "@lumora/fs") == 0)
         return "return lumora.fs\n";
-    if (strcmp(name, "@lune/fs") == 0)
-        return "local h=__lumora_lune; return {readFile=h.readFile,writeFile=h.writeFile,exists=h.exists,isFile=h.isFile,isDir=h.isDir,readDir=h.readDir,makeDir=h.makeDir,remove=h.remove,move=h.move,copy=h.copy} \n";
-    if (strcmp(name, "@lune/stdio") == 0)
+    if (strcmp(name, "@lumora/fs") == 0)
+        return "return lumora.fs\n";
+    if (strcmp(name, "@lumora/stdio") == 0)
         return "return {write=function(...) io.write(...) end,print=print,readLine=function() return io.read(\"*l\") end} \n";
-    if (strcmp(name, "@lune/process") == 0)
-        return "local h=__lumora_lune; local p={}; p.args=arg; p.cwd=h.cwd; p.setCwd=h.setCwd; p.env=h.env; p.exec=h.exec; p.exit=function(code) error({__lumora_process_exit=code or 0}) end; return p\n";
-    if (strcmp(name, "@lune/luau") == 0)
+    if (strcmp(name, "@lumora/process") == 0)
+        return "local h=__lumora_host; local p={}; p.args=arg; p.cwd=h.cwd; p.setCwd=h.setCwd; p.env=h.env; p.exec=h.exec; p.exit=function(code) error({__lumora_process_exit=code or 0}) end; return p\n";
+    if (strcmp(name, "@lumora/luau") == 0)
         return "return {load=loadstring,compile=function(source) return loadstring(source) end}\n";
     if (strcmp(name, "@lumora/datetime") == 0)
         return "local M={}\nfunction M.now() return os.time() end\nfunction M.fromUnix(ts) return os.date('!*t', ts) end\nfunction M.toUnix(t) return os.time(t) end\nfunction M.format(ts, fmt) return os.date(fmt or '!%Y-%m-%dT%H:%M:%SZ', ts or os.time()) end\nreturn M\n";
-    if (strcmp(name, "@lune/datetime") == 0)
+    if (strcmp(name, "@lumora/datetime") == 0)
         return "local M={}\nfunction M.now() return os.time() end\nfunction M.fromUnixTimestamp(ts) return ts end\nfunction M.toUnixTimestamp(value) return tonumber(value) end\nfunction M.fromUnix(ts) return ts end\nfunction M.toUnix(value) return tonumber(value) end\nfunction M.format(value, fmt) return os.date(fmt or '!%Y-%m-%dT%H:%M:%SZ', tonumber(value) or os.time()) end\nreturn M\n";
-    if (strcmp(name, "@lune/serde") == 0)
+    if (strcmp(name, "@lumora/serde") == 0)
         return "return {encode=function(value) return json.encode(value) end, decode=function(value) return json.decode(value) end, hash=function(value) local s=json.encode(value); local h=0; for i=1,#s do h=(h*31+s:byte(i))%4294967296 end; return string.format('%08x',h) end}\n";
-    if (strcmp(name, "@lune/task") == 0)
+    if (strcmp(name, "@lumora/task") == 0)
         return "return {spawn=task.spawn,defer=task.defer,delay=task.delay,cancel=task.cancel,wait=task.wait,resume=task.resume,status=task.status}\n";
     if (strcmp(name, "@lumora/serde") == 0)
         return "return {encode=function(value) return json.encode(value) end, decode=function(value) return json.decode(value) end}\n";
     if (strcmp(name, "@lumora/task") == 0)
         return "local M={}\nfunction M.spawn(fn, ...) return task.spawn(fn, ...) end\nfunction M.defer(fn, ...) return task.defer(fn, ...) end\nfunction M.delay(seconds, fn, ...) return task.delay(seconds, fn, ...) end\nfunction M.cancel(thread) return task.cancel(thread) end\nfunction M.wait(seconds) return task.wait(seconds) end\nfunction M.run() return task._runScheduler() end\nreturn M\n";
+    if (strcmp(name, "@lumora/regex") == 0) return "return lumora.regex\n";
+    if (strcmp(name, "@lumora/analysis") == 0) return "return lumora.analysis\n";
     if (strcmp(name, "@lumora/roblox") == 0)
         return "return {game=game,workspace=workspace,Instance=Instance,Enum=Enum,Vector2=Vector2,Vector3=Vector3,CFrame=CFrame,Color3=Color3,UDim=UDim,UDim2=UDim2,Ray=Ray,Random=Random}\n";
     return nullptr;
@@ -162,7 +164,7 @@ static const char* embeddedModule(const char* name)
 
 static void copyHostField(lua_State* L, int table, const char* name)
 {
-    lua_getglobal(L, "__lumora_lune");
+    lua_getglobal(L, "__lumora_host");
     lua_getfield(L, -1, name);
     lua_setfield(L, table, name);
     lua_pop(L, 1);
@@ -173,10 +175,7 @@ static int embeddedRequire(lua_State* L)
     const char* name = luaL_checkstring(L, 1);
     if (embeddedModule(name))
     {
-        if (strncmp(name, "@lumora/", 8) == 0 ||
-            strcmp(name, "@lune/datetime") == 0 ||
-            strcmp(name, "@lune/serde") == 0 ||
-            strcmp(name, "@lune/task") == 0)
+        if (strncmp(name, "@lumora/", 8) == 0)
         {
             const char* source = embeddedModule(name);
             Luau::CompileOptions options;
@@ -197,26 +196,26 @@ static int embeddedRequire(lua_State* L)
             for (int i = 0; fields[i]; ++i) { lua_getfield(L, -1, fields[i]); lua_setfield(L, module, fields[i]); }
             lua_pop(L, 2);
         }
-        else if (strcmp(name, "@lune/fs") == 0)
+        else if (strcmp(name, "@lumora/fs") == 0)
         {
             const char* fields[] = {"readFile", "writeFile", "exists", "isFile", "isDir", "readDir", "makeDir", "remove", "copy", "move", nullptr};
             for (int i = 0; fields[i]; ++i) copyHostField(L, module, fields[i]);
         }
-        else if (strcmp(name, "@lune/process") == 0)
+        else if (strcmp(name, "@lumora/process") == 0)
         {
             copyHostField(L, module, "cwd"); copyHostField(L, module, "setCwd"); copyHostField(L, module, "env"); copyHostField(L, module, "exec");
             lua_getglobal(L, "arg"); lua_setfield(L, module, "args");
-            addFunction(L, module, "exit", luneProcessExit);
+            addFunction(L, module, "exit", hostProcessExit);
         }
-        else if (strcmp(name, "@lune/luau") == 0)
+        else if (strcmp(name, "@lumora/luau") == 0)
         {
-            addFunction(L, module, "load", luneLoad);
-            addFunction(L, module, "compile", luneCompile);
+            addFunction(L, module, "load", lumoraLoad);
+            addFunction(L, module, "compile", lumoraCompile);
         }
         else
         {
             lua_getglobal(L, "print"); lua_setfield(L, module, "print");
-            addFunction(L, module, "write", luneStdioWrite);
+            addFunction(L, module, "write", lumoraStdioWrite);
             lua_getglobal(L, "print"); lua_setfield(L, module, "readLine");
         }
         return 1;
