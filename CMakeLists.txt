@@ -37,6 +37,7 @@ add_executable(lumora
     src/host_api.cpp
     src/analysis.cpp
     src/analyzer.cpp
+    src/native_modules.cpp
 )
 if(LUMORA_VISUAL_AVAILABLE)
     target_sources(lumora PRIVATE src/visual.cpp)
@@ -51,7 +52,7 @@ if(LUMORA_VISUAL_AVAILABLE)
 endif()
 
 if(UNIX)
-    target_link_libraries(lumora PRIVATE pthread dl m)
+    target_link_libraries(lumora PRIVATE pthread dl m curl ssl crypto sodium uv)
 endif()
 
 add_custom_command(TARGET lumora POST_BUILD
@@ -80,6 +81,9 @@ if(BUILD_TESTING)
     add_test(NAME analysis_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/analysis_contract.lua)
     add_test(NAME analysis_cycle_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/analysis_cycle_contract.lua)
     add_test(NAME standard_modules_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/standard_modules_contract.lua)
+    add_test(NAME native_modules_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/native_modules_contract.lua)
+    add_test(NAME native_network_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/native_network_contract.sh)
+    add_test(NAME native_http_server_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/native_http_server_contract.sh)
     add_test(NAME sandbox_require_contract COMMAND $<TARGET_FILE:lumora> --sandbox ${CMAKE_SOURCE_DIR}/tests/sandbox_require_contract.lua)
     add_test(NAME scheduler_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/scheduler_contract.lua)
     add_test(NAME scheduler_real_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/scheduler_real_contract.lua)

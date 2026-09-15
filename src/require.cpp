@@ -5,6 +5,11 @@
 #include "Luau/Require.h"
 #include "Luau/VfsNavigator.h"
 #include "lumora.h"
+#include "native_modules.h"
+#include "stdlib_stringext.inc"
+#include "stdlib_system.inc"
+#include "stdlib_tableext.inc"
+#include "stdlib_time.inc"
 
 #include <fstream>
 #include <cstring>
@@ -135,8 +140,6 @@ static const char* embeddedModule(const char* name)
     if (!name) return nullptr;
     if (strcmp(name, "@lumora/fs") == 0)
         return "return lumora.fs\n";
-    if (strcmp(name, "@lumora/fs") == 0)
-        return "return lumora.fs\n";
     if (strcmp(name, "@lumora/stdio") == 0)
         return "return {write=function(...) io.write(...) end,print=print,readLine=function() return io.read(\"*l\") end} \n";
     if (strcmp(name, "@lumora/process") == 0)
@@ -145,16 +148,14 @@ static const char* embeddedModule(const char* name)
         return "return {load=loadstring,compile=function(source) return loadstring(source) end}\n";
     if (strcmp(name, "@lumora/datetime") == 0)
         return "local M={}\nfunction M.now() return os.time() end\nfunction M.fromUnix(ts) return os.date('!*t', ts) end\nfunction M.toUnix(t) return os.time(t) end\nfunction M.format(ts, fmt) return os.date(fmt or '!%Y-%m-%dT%H:%M:%SZ', ts or os.time()) end\nreturn M\n";
-    if (strcmp(name, "@lumora/datetime") == 0)
-        return "local M={}\nfunction M.now() return os.time() end\nfunction M.fromUnixTimestamp(ts) return ts end\nfunction M.toUnixTimestamp(value) return tonumber(value) end\nfunction M.fromUnix(ts) return ts end\nfunction M.toUnix(value) return tonumber(value) end\nfunction M.format(value, fmt) return os.date(fmt or '!%Y-%m-%dT%H:%M:%SZ', tonumber(value) or os.time()) end\nreturn M\n";
     if (strcmp(name, "@lumora/serde") == 0)
         return "return {encode=function(value) return json.encode(value) end, decode=function(value) return json.decode(value) end, hash=function(value) local s=json.encode(value); local h=0; for i=1,#s do h=(h*31+s:byte(i))%4294967296 end; return string.format('%08x',h) end}\n";
     if (strcmp(name, "@lumora/task") == 0)
         return "return {spawn=task.spawn,defer=task.defer,delay=task.delay,cancel=task.cancel,wait=task.wait,resume=task.resume,status=task.status}\n";
-    if (strcmp(name, "@lumora/serde") == 0)
-        return "return {encode=function(value) return json.encode(value) end, decode=function(value) return json.decode(value) end}\n";
-    if (strcmp(name, "@lumora/task") == 0)
-        return "local M={}\nfunction M.spawn(fn, ...) return task.spawn(fn, ...) end\nfunction M.defer(fn, ...) return task.defer(fn, ...) end\nfunction M.delay(seconds, fn, ...) return task.delay(seconds, fn, ...) end\nfunction M.cancel(thread) return task.cancel(thread) end\nfunction M.wait(seconds) return task.wait(seconds) end\nfunction M.run() return task._runScheduler() end\nreturn M\n";
+    if (strcmp(name, "@lumora/stringext") == 0) return kLumoraStringext;
+    if (strcmp(name, "@lumora/tableext") == 0) return kLumoraTableext;
+    if (strcmp(name, "@lumora/time") == 0) return kLumoraTime;
+    if (strcmp(name, "@lumora/system") == 0) return kLumoraSystem;
     if (strcmp(name, "@lumora/regex") == 0) return "return lumora.regex\n";
     if (strcmp(name, "@lumora/analysis") == 0) return "return lumora.analysis\n";
     if (strcmp(name, "@lumora/roblox") == 0)
@@ -173,6 +174,8 @@ static void copyHostField(lua_State* L, int table, const char* name)
 static int embeddedRequire(lua_State* L)
 {
     const char* name = luaL_checkstring(L, 1);
+    if (requireNativeModule(L, name))
+        return 1;
     if (embeddedModule(name))
     {
         if (strncmp(name, "@lumora/", 8) == 0)
