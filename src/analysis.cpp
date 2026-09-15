@@ -9,6 +9,8 @@
 #include <set>
 #include <fstream>
 #include <sstream>
+#include <filesystem>
+#include <algorithm>
 
 namespace {
 
@@ -30,24 +32,24 @@ static int regexIsMatch(lua_State* L) {
     lua_pushboolean(L, std::regex_search(input, pattern)); return 1;
 }
 
-static void pushMatch(lua_State* L, const std::string& input, const std::smatch& m) {
+static void pushMatch(lua_State* L, const std::smatch& m) {
     lua_newtable(L); const int t = lua_gettop(L);
     field(L, t, "text", m.str()); field(L, t, "start", int(m.position()) + 1); field(L, t, "end", int(m.position() + m.length()));
     lua_newtable(L); const int groups = lua_gettop(L);
-    for (size_t i = 1; i < m.size(); ++i) { if (m[i].matched) add(L, groups, int(i), m[i].str()); }
+    for (size_t i = 1; i < m.size(); ++i) if (m[i].matched) add(L, groups, int(i), m[i].str());
     lua_setfield(L, t, "groups");
 }
 
 static int regexMatch(lua_State* L) {
     const std::string input = value(L, 1); const auto pattern = compilePattern(L, 2); std::smatch m;
     if (!std::regex_search(input, m, pattern)) { lua_pushnil(L); return 1; }
-    pushMatch(L, input, m); return 1;
+    pushMatch(L, m); return 1;
 }
 
 static int regexMatchAll(lua_State* L) {
     const std::string input = value(L, 1); const auto pattern = compilePattern(L, 2); std::sregex_iterator it(input.begin(), input.end(), pattern), end;
     lua_newtable(L); const int result = lua_gettop(L); int index = 1;
-    for (; it != end; ++it) pushMatch(L, input, *it), lua_rawseti(L, result, index++);
+    for (; it != end; ++it) { pushMatch(L, *it); lua_rawseti(L, result, index++); }
     return 1;
 }
 
@@ -66,22 +68,135 @@ static int regexSplit(lua_State* L) {
 
 static std::string read(const std::string& path) { std::ifstream f(path); std::ostringstream s; s << f.rdbuf(); return s.str(); }
 
-static int graph(lua_State* L) {
-    std::string source = value(L, 1); if (source.rfind("@file:", 0) == 0) source = read(source.substr(6));
-    std::map<std::string, int> lines; std::set<std::string> calls; std::vector<std::pair<std::string,std::string>> edges;
-    std::regex fn(R"((?:local\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*))"), req(R"(require\s*\(\s*["']([^"']+)["']\s*\))"), call(R"(([A-Za-z_][A-Za-z0-9_]*)\s*\()"), line(R"([^\n]*)");
-    std::string current = "<main>"; int number = 0; std::stringstream stream(source); std::string text;
-    while (std::getline(stream, text)) {
-        ++number; std::smatch m;
-        if (std::regex_search(text, m, fn)) { current = m[1].str(); lines[current] = number; }
-        for (std::sregex_iterator i(text.begin(), text.end(), req), e; i != e; ++i) edges.emplace_back(current, "module:" + (*i)[1].str());
-        for (std::sregex_iterator i(text.begin(), text.end(), call), e; i != e; ++i) { const std::string target = (*i)[1].str(); if (target != "if" && target != "for" && target != "while" && target != "function") { calls.insert(target); edges.emplace_back(current, "call:" + target); } }
+struct Module {
+    std::string id;
+    std::string path;
+    std::string source;
+};
+
+struct ModuleGraph {
+    std::vector<Module> modules;
+    std::vector<std::pair<std::string, std::string>> moduleEdges;
+    std::map<std::string, std::vector<std::string>> adjacency;
+    std::set<std::string> seen;
+};
+
+static std::string normalizeModulePath(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto absolute = std::filesystem::weakly_canonical(path, error);
+    return (error ? path.lexically_normal() : absolute).generic_string();
+}
+
+static std::string resolveModule(const std::string& parent, const std::string& requested) {
+    if (requested.empty() || requested[0] != '.') return {};
+    std::filesystem::path base = std::filesystem::path(parent).parent_path() / requested;
+    std::vector<std::filesystem::path> candidates = {base, base.string() + ".luau", base.string() + ".lua", base / "init.luau", base / "init.lua"};
+    for (const auto& candidate : candidates) {
+        std::error_code error;
+        if (std::filesystem::is_regular_file(candidate, error) && !error) return normalizeModulePath(candidate);
     }
-    lua_newtable(L); const int out = lua_gettop(L); lua_newtable(L); const int nodes = lua_gettop(L); int ni = 1;
-    for (const auto& p : lines) { lua_newtable(L); const int n = lua_gettop(L); field(L,n,"id",p.first); field(L,n,"kind","function"); field(L,n,"line",p.second); lua_rawseti(L,nodes,ni++); }
-    lua_newtable(L); const int edgeTable = lua_gettop(L); int ei = 1;
-    for (const auto& edge : edges) { lua_newtable(L); const int e = lua_gettop(L); field(L,e,"from",edge.first); field(L,e,"to",edge.second); lua_rawseti(L,edgeTable,ei++); }
-    lua_setfield(L,out,"edges"); lua_setfield(L,out,"nodes"); field(L,out,"lineCount",number); return 1;
+    return {};
+}
+
+static void collectModule(ModuleGraph& graph, const std::string& path) {
+    const std::string id = normalizeModulePath(path);
+    if (graph.seen.count(id)) return;
+    graph.seen.insert(id);
+    Module module{id, id, read(id)};
+    graph.modules.push_back(module);
+    const std::regex req(R"(require\s*\(\s*["']([^"']+)["']\s*\))");
+    for (std::sregex_iterator it(module.source.begin(), module.source.end(), req), end; it != end; ++it) {
+        const std::string requested = (*it)[1].str();
+        const std::string target = resolveModule(id, requested);
+        const std::string targetId = target.empty() ? "module:" + requested : target;
+        graph.moduleEdges.emplace_back(id, targetId);
+        graph.adjacency[id].push_back(targetId);
+        if (!target.empty()) collectModule(graph, target);
+    }
+}
+
+static void dfsCycles(const std::string& node, const std::map<std::string, std::vector<std::string>>& adjacency,
+                      std::map<std::string, int>& colors, std::vector<std::string>& stack,
+                      std::vector<std::vector<std::string>>& cycles) {
+    colors[node] = 1; stack.push_back(node);
+    auto found = adjacency.find(node);
+    if (found != adjacency.end()) {
+        for (const std::string& next : found->second) {
+            if (!adjacency.count(next)) continue;
+            if (colors[next] == 0) dfsCycles(next, adjacency, colors, stack, cycles);
+            else if (colors[next] == 1) {
+                auto begin = std::find(stack.begin(), stack.end(), next);
+                if (begin != stack.end()) { std::vector<std::string> cycle(begin, stack.end()); cycle.push_back(next); cycles.push_back(std::move(cycle)); }
+            }
+        }
+    }
+    stack.pop_back(); colors[node] = 2;
+}
+
+static int graph(lua_State* L) {
+    const std::string input = value(L, 1);
+    ModuleGraph graphData;
+    std::string rootId = "<main>";
+    if (input.rfind("@file:", 0) == 0) {
+        const std::string rootPath = normalizeModulePath(input.substr(6));
+        collectModule(graphData, rootPath);
+        rootId = rootPath;
+    } else {
+        graphData.modules.push_back({rootId, rootId, input});
+        graphData.seen.insert(rootId);
+        const std::regex req(R"(require\s*\(\s*["']([^"']+)["']\s*\))");
+        for (std::sregex_iterator it(input.begin(), input.end(), req), end; it != end; ++it) {
+            const std::string target = "module:" + (*it)[1].str();
+            graphData.moduleEdges.emplace_back(rootId, target);
+            graphData.adjacency[rootId].push_back(target);
+        }
+    }
+
+    std::map<std::string, int> colors; std::vector<std::string> stack; std::vector<std::vector<std::string>> cycles;
+    for (const auto& module : graphData.modules) if (colors[module.id] == 0) dfsCycles(module.id, graphData.adjacency, colors, stack, cycles);
+
+    lua_newtable(L); const int out = lua_gettop(L);
+    lua_newtable(L); const int nodes = lua_gettop(L); int ni = 1;
+    for (const auto& module : graphData.modules) {
+        lua_newtable(L); const int node = lua_gettop(L); field(L, node, "id", module.id); field(L, node, "kind", "module"); field(L, node, "path", module.path);
+        int line = 1; for (char c : module.source) if (c == '\n') ++line; field(L, node, "lineCount", line); lua_rawseti(L, nodes, ni++);
+    }
+    lua_setfield(L, out, "modules");
+
+    lua_newtable(L); const int edges = lua_gettop(L); int ei = 1;
+    for (const auto& edge : graphData.moduleEdges) { lua_newtable(L); const int item = lua_gettop(L); field(L, item, "from", edge.first); field(L, item, "to", edge.second); field(L, item, "kind", "module"); lua_rawseti(L, edges, ei++); }
+    lua_setfield(L, out, "moduleEdges");
+
+    lua_newtable(L); const int cycleTable = lua_gettop(L); int ci = 1;
+    for (const auto& cycle : cycles) { lua_newtable(L); const int item = lua_gettop(L); int index = 1; for (const auto& id : cycle) add(L, item, index++, id); lua_rawseti(L, cycleTable, ci++); }
+    lua_setfield(L, out, "cycles"); field(L, out, "hasCycle", !cycles.empty());
+    field(L, out, "moduleCount", int(graphData.modules.size())); field(L, out, "edgeCount", int(graphData.moduleEdges.size()));
+
+    // Preserve the original single-source call graph fields for callers that
+    // pass source text directly, while the module fields above expose the
+    // recursive global graph for @file inputs.
+    const std::string source = graphData.modules.empty() ? input : graphData.modules.front().source;
+    std::regex fn(R"((?:local\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*))"), call(R"(([A-Za-z_][A-Za-z0-9_]*)\s*\()"), req(R"(require\s*\(\s*["']([^"']+)["']\s*\))");
+    lua_newtable(L); const int functionNodes = lua_gettop(L); int nodeIndex = 1; std::string current = "<main>"; int lineNumber = 0;
+    std::stringstream lines(source); std::string line;
+    while (std::getline(lines, line)) {
+        ++lineNumber; std::smatch match;
+        if (std::regex_search(line, match, fn)) { current = match[1].str(); lua_newtable(L); const int node = lua_gettop(L); field(L,node,"id",current); field(L,node,"kind","function"); field(L,node,"line",lineNumber); lua_rawseti(L,functionNodes,nodeIndex++); }
+    }
+    lua_setfield(L, out, "nodes");
+    lua_newtable(L); const int callEdges = lua_gettop(L); int callIndex = 1; lineNumber = 0; current = "<main>";
+    std::stringstream edgeLines(source);
+    while (std::getline(edgeLines, line)) {
+        ++lineNumber; std::smatch match;
+        if (std::regex_search(line, match, fn)) current = match[1].str();
+        for (std::sregex_iterator it(line.begin(), line.end(), req), end; it != end; ++it) { lua_newtable(L); const int edge = lua_gettop(L); field(L,edge,"from",current); field(L,edge,"to","module:" + (*it)[1].str()); lua_rawseti(L,callEdges,callIndex++); }
+        for (std::sregex_iterator it(line.begin(), line.end(), call), end; it != end; ++it) { const std::string target = (*it)[1].str(); if (target == "if" || target == "for" || target == "while" || target == "function" || target == "require") continue; lua_newtable(L); const int edge = lua_gettop(L); field(L,edge,"from",current); field(L,edge,"to","call:" + target); lua_rawseti(L,callEdges,callIndex++); }
+    }
+    lua_setfield(L, out, "edges");
+    int sourceLines = 1;
+    for (char c : source) if (c == '\n') ++sourceLines;
+    field(L, out, "lineCount", sourceLines);
+    return 1;
 }
 
 static int scan(lua_State* L) {
