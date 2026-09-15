@@ -1360,7 +1360,7 @@ end
 -- library (which requires a complete Roblox GUI rendering system).
 local _winduiCache = nil
 
--- Create a WindUI stub element (tabs, toggles, sliders, etc.)
+-- Create a headless WindUI element with observable state and callbacks.
 local function _makeElement()
     local el = {
         __type = "WindUIElement",
@@ -1437,6 +1437,9 @@ local function _makeWindow()
     local w = _makeElement()
     w._flags = {}
     w._tabs = {}
+    w.IsOpen = false
+    w.Destroyed = false
+    w._destroyCallbacks = {}
     function w:Tab(opts)
         opts = opts or {}
         local t = _makeTab()
@@ -1448,13 +1451,33 @@ local function _makeWindow()
     function w:GetFlag(name) return w._flags[name] end
     function w:GetFlagElement(name) return w._flags[name] end
     function w:ListFlags() return w._flags end
-    function w:Open() end
-    function w:Close() end
-    function w:OnDestroy(fn) end
-    function w:SetBackgroundImage(img) end
-    function w:SetBackgroundImageTransparency(val) end
-    function w:SetIconSize(size) end
-    function w:Destroy() end
+    function w:Open()
+        if w.Destroyed then return false end
+        w.IsOpen = true
+        if w._onOpen then pcall(w._onOpen, w) end
+        return true
+    end
+    function w:Close()
+        if w.Destroyed then return false end
+        w.IsOpen = false
+        if w._onClose then pcall(w._onClose, w) end
+        return true
+    end
+    function w:OnDestroy(fn)
+        assert(type(fn) == "function", "OnDestroy callback must be a function")
+        table.insert(w._destroyCallbacks, fn)
+        return { Disconnect = function() end, Connected = true }
+    end
+    function w:SetBackgroundImage(img) w.BackgroundImage = img; return w end
+    function w:SetBackgroundImageTransparency(val) w.BackgroundImageTransparency = val; return w end
+    function w:SetIconSize(size) w.IconSize = size; return w end
+    function w:Destroy()
+        if w.Destroyed then return end
+        w.Destroyed = true
+        w.IsOpen = false
+        for _, fn in ipairs(w._destroyCallbacks) do pcall(fn, w) end
+        w._destroyCallbacks = {}
+    end
     return w
 end
 
@@ -1472,22 +1495,22 @@ local function _makeWindUI()
         return _makeWindow()
     end
     function ui:GetThemes() return ui._themes end
-    function ui:SetTheme(name) end
+    function ui:SetTheme(name) assert(ui._themes[name], "unknown theme: " .. tostring(name)); ui.Theme = name; return ui._themes[name] end
     function ui:AddTheme(theme)
         if theme and theme.Name then ui._themes[theme.Name] = theme end
     end
-    function ui:SetLanguage(lang) end
-    function ui:Localization(opts) end
-    function ui:Notify(opts) end
-    function ui:Save() end
-    function ui:Load() end
-    function ui:SetIconSize(size) end
+    function ui:SetLanguage(lang) assert(type(lang) == "string", "language must be a string"); ui.Language = lang; return lang end
+    function ui:Localization(opts) assert(type(opts) == "table", "localization options must be a table"); ui.LocalizationData = opts; return opts end
+    function ui:Notify(opts) opts = opts or {}; ui.LastNotification = opts; return opts end
+    function ui:Save() return { Theme = ui.Theme, Language = ui.Language, Localization = ui.LocalizationData } end
+    function ui:Load(state) assert(type(state) == "table", "UI state must be a table"); if state.Theme then ui:SetTheme(state.Theme) end; if state.Language then ui:SetLanguage(state.Language) end; if state.Localization then ui.LocalizationData = state.Localization end; return ui end
+    function ui:SetIconSize(size) assert(type(size) == "number", "icon size must be a number"); ui.IconSize = size; return size end
     return ui
 end
 
 local function _loadWindUI()
     if _winduiCache then return _winduiCache end
-    -- Return a Lua source that creates and returns the WindUI stub.
+    -- Return a Lua source that creates and returns the headless WindUI implementation.
     -- This source is compiled and called by loadstring(...)() in the script.
     _winduiCache = [[
 local ui = {}
@@ -1560,6 +1583,9 @@ local function makeWindow()
     local w = makeElement()
     w._flags = {}
     w._tabs = {}
+    w.IsOpen = false
+    w.Destroyed = false
+    w._destroyCallbacks = {}
     function w:Tab(opts)
         opts = opts or {}
         local t = makeElement()
@@ -1572,25 +1598,45 @@ local function makeWindow()
     function w:GetFlag(name) return w._flags[name] end
     function w:GetFlagElement(name) return w._flags[name] end
     function w:ListFlags() return w._flags end
-    function w:Open() end
-    function w:Close() end
-    function w:OnDestroy(fn) end
-    function w:SetBackgroundImage(img) end
-    function w:SetBackgroundImageTransparency(val) end
-    function w:SetIconSize(size) end
-    function w:Destroy() end
+    function w:Open()
+        if w.Destroyed then return false end
+        w.IsOpen = true
+        if w._onOpen then pcall(w._onOpen, w) end
+        return true
+    end
+    function w:Close()
+        if w.Destroyed then return false end
+        w.IsOpen = false
+        if w._onClose then pcall(w._onClose, w) end
+        return true
+    end
+    function w:OnDestroy(fn)
+        assert(type(fn) == "function", "OnDestroy callback must be a function")
+        table.insert(w._destroyCallbacks, fn)
+        return { Disconnect = function() end, Connected = true }
+    end
+    function w:SetBackgroundImage(img) w.BackgroundImage = img; return w end
+    function w:SetBackgroundImageTransparency(val) w.BackgroundImageTransparency = val; return w end
+    function w:SetIconSize(size) w.IconSize = size; return w end
+    function w:Destroy()
+        if w.Destroyed then return end
+        w.Destroyed = true
+        w.IsOpen = false
+        for _, fn in ipairs(w._destroyCallbacks) do pcall(fn, w) end
+        w._destroyCallbacks = {}
+    end
     return w
 end
 function ui:CreateWindow(opts) return makeWindow() end
 function ui:GetThemes() return ui._themes end
-function ui:SetTheme(name) end
+function ui:SetTheme(name) assert(ui._themes[name], "unknown theme: " .. tostring(name)); ui.Theme = name; return ui._themes[name] end
 function ui:AddTheme(theme) if theme and theme.Name then ui._themes[theme.Name] = theme end end
-function ui:SetLanguage(lang) end
-function ui:Localization(opts) end
-function ui:Notify(opts) end
-function ui:Save() end
-function ui:Load() end
-function ui:SetIconSize(size) end
+function ui:SetLanguage(lang) assert(type(lang) == "string", "language must be a string"); ui.Language = lang; return lang end
+function ui:Localization(opts) assert(type(opts) == "table", "localization options must be a table"); ui.LocalizationData = opts; return opts end
+function ui:Notify(opts) opts = opts or {}; ui.LastNotification = opts; return opts end
+function ui:Save() return { Theme = ui.Theme, Language = ui.Language, Localization = ui.LocalizationData } end
+function ui:Load(state) assert(type(state) == "table", "UI state must be a table"); if state.Theme then ui:SetTheme(state.Theme) end; if state.Language then ui:SetLanguage(state.Language) end; if state.Localization then ui.LocalizationData = state.Localization end; return ui end
+function ui:SetIconSize(size) assert(type(size) == "number", "icon size must be a number"); ui.IconSize = size; return size end
 return ui
 ]]
     return _winduiCache
@@ -1608,7 +1654,7 @@ instance_mt.__index = function(self, key)
                 if url and string.find(url, "WindUI", 1, true) then
                     return _loadWindUI()
                 end
-                -- Icons library URL — return a stub that provides the icon API
+                -- Icons library URL — return a deterministic, observable icon API
                 if url and string.find(url, "Icons", 1, true) then
                     return [[
 local module = {}
@@ -1616,7 +1662,7 @@ local icons = {}
 local iconType = 'lucide'
 function module.SetIconsType(t) iconType = t or 'lucide' end
 function module.AddIcons(tbl) for k,v in pairs(tbl or {}) do icons[k] = v end end
-function module.Init(r, name) end
+function module.Init(r, name) module.Root = r; module.Name = name; return module end
 function module.Icon(name, opts, h)
     -- WindUI expects Icon to return {imageString, {ImageRectSize=..., ImageRectPosition=...}}
     -- when h ~= false, or just the image string when h == false
@@ -1675,7 +1721,7 @@ return module
     return _savedInstanceIndex(self, key)
 end
 
--- ========== Services with stub methods ==========
+-- ========== Runtime services ==========
 -- RunService
 do
     local rs = game:GetService("RunService")
@@ -2161,7 +2207,14 @@ end
 -- ScriptContext
 do
     local sc = game:GetService("ScriptContext")
-    function sc:SetTimeout(duration, coreScriptsOnly) end
+    sc.Timeout = nil
+    sc.CoreScriptsOnly = false
+    function sc:SetTimeout(duration, coreScriptsOnly)
+        assert(type(duration) == "number", "ScriptContext:SetTimeout expects a number")
+        sc.Timeout = duration
+        sc.CoreScriptsOnly = not not coreScriptsOnly
+        return sc.Timeout
+    end
 end
 
 -- TeleportService
@@ -2222,7 +2275,7 @@ do
     function cs:GetInstanceRemovedSignal(tag) self._removed[tag] = self._removed[tag] or signal(); return self._removed[tag] end
 end
 
--- Animator / Humanoid stubs (set on Character instances)
+-- Animator / Humanoid simulation (set on Character instances)
 local function _makeHumanoid()
     local h = Instance.new("Humanoid")
     h.Health = 100
@@ -2234,13 +2287,16 @@ local function _makeHumanoid()
     h._animator = Instance.new("Animator")
     h._animator.Name = "Animator"
     h._animator.Parent = h
-    function h:GetPlayingAnimationTracks() return {} end
-    function h:Move(direction, relative) end
-    function h:Jump() end
-    function h:ChangeState(state) end
-    function h:GetState() return "Running" end
-    function h:SetStateEnabled(state, enabled) end
-    function h:LoadAnimation(anim) return { Play = function(self) end, Stop = function(self) end, AdjustSpeed = function(self, speed) end } end
+    h._tracks = {}
+    h._states = {}
+    h._state = Enum.HumanoidStateType.Running
+    function h:GetPlayingAnimationTracks() local out = {}; for _, track in ipairs(h._tracks) do if track.IsPlaying then table.insert(out, track) end end; return out end
+    function h:Move(direction, relative) self.MoveDirection = direction; self.LastMoveRelative = not not relative end
+    function h:Jump() self.JumpCount = (self.JumpCount or 0) + 1; self._state = Enum.HumanoidStateType.Jumping end
+    function h:ChangeState(state) self._state = state end
+    function h:GetState() return self._state end
+    function h:SetStateEnabled(state, enabled) self._states[state] = not not enabled end
+    function h:LoadAnimation(anim) local track = { Animation = anim, IsPlaying = false, Speed = 1 }; function track:Play() self.IsPlaying = true end; function track:Stop() self.IsPlaying = false end; function track:AdjustSpeed(speed) self.Speed = speed end; table.insert(h._tracks, track); return track end
     return h
 end
 
@@ -2259,9 +2315,9 @@ if not workspace.CurrentCamera then
     workspace.CurrentCamera.Parent = workspace
 end
 
--- SetCoreGuiEnabled global stub (some scripts call it on game)
-function game:SetCoreGuiEnabled(gui, enabled) end
-function game:GetCoreGuiEnabled(gui) return true end
+-- SetCoreGuiEnabled global compatibility forwards to StarterGui state.
+function game:SetCoreGuiEnabled(gui, enabled) return game:GetService("StarterGui"):SetCoreGuiEnabled(gui, enabled) end
+function game:GetCoreGuiEnabled(gui) return game:GetService("StarterGui"):GetCoreGuiEnabled(gui) end
 )LUA";
 
 // loadstring(source [, chunkName]) — mirrors the Roblox global. Compiles

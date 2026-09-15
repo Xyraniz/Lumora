@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0] — Runtime expansion
+
+### Added
+- Independent `@lune/datetime`, `@lune/serde`, and `@lune/task` compatibility modules implemented inside Lumora without repository references.
+- Observable headless WindUI state: window lifecycle, destruction callbacks, theme and language state, localization, notifications, save/load state, icon sizing, and deterministic icon initialization.
+
+### Changed
+- Replaced empty UI and service wording with explicit runtime behavior.
+- Translated the remaining non-English example text to English.
+
+### Compatibility note
+- No fake network, physics, authentication, or Roblox client behavior was added. Unsupported capabilities remain explicit rather than returning fabricated results.
+
 All notable changes to Lumora are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]

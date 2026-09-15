@@ -2,7 +2,7 @@
 -- // shitty code from 2021
 
 local Global = getgenv and getgenv() or _G;
--- // söylesene bana, tüm bunlar ne zaman sona erecek?
+-- // tell me when all of this will finally end
 local LibraryFunctions = {Notifications = {}, Connections = {}, Flags = {}}
 
 if not game:IsLoaded() then game.Loaded:wait() end

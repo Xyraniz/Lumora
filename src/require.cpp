@@ -145,6 +145,12 @@ static const char* embeddedModule(const char* name)
         return "return {load=loadstring,compile=function(source) return loadstring(source) end}\n";
     if (strcmp(name, "@lumora/datetime") == 0)
         return "local M={}\nfunction M.now() return os.time() end\nfunction M.fromUnix(ts) return os.date('!*t', ts) end\nfunction M.toUnix(t) return os.time(t) end\nfunction M.format(ts, fmt) return os.date(fmt or '!%Y-%m-%dT%H:%M:%SZ', ts or os.time()) end\nreturn M\n";
+    if (strcmp(name, "@lune/datetime") == 0)
+        return "local M={}\nfunction M.now() return os.time() end\nfunction M.fromUnixTimestamp(ts) return ts end\nfunction M.toUnixTimestamp(value) return tonumber(value) end\nfunction M.fromUnix(ts) return ts end\nfunction M.toUnix(value) return tonumber(value) end\nfunction M.format(value, fmt) return os.date(fmt or '!%Y-%m-%dT%H:%M:%SZ', tonumber(value) or os.time()) end\nreturn M\n";
+    if (strcmp(name, "@lune/serde") == 0)
+        return "return {encode=function(value) return json.encode(value) end, decode=function(value) return json.decode(value) end, hash=function(value) local s=json.encode(value); local h=0; for i=1,#s do h=(h*31+s:byte(i))%4294967296 end; return string.format('%08x',h) end}\n";
+    if (strcmp(name, "@lune/task") == 0)
+        return "return {spawn=task.spawn,defer=task.defer,delay=task.delay,cancel=task.cancel,wait=task.wait,resume=task.resume,status=task.status}\n";
     if (strcmp(name, "@lumora/serde") == 0)
         return "return {encode=function(value) return json.encode(value) end, decode=function(value) return json.decode(value) end}\n";
     if (strcmp(name, "@lumora/task") == 0)
@@ -167,7 +173,10 @@ static int embeddedRequire(lua_State* L)
     const char* name = luaL_checkstring(L, 1);
     if (embeddedModule(name))
     {
-        if (strncmp(name, "@lumora/", 8) == 0)
+        if (strncmp(name, "@lumora/", 8) == 0 ||
+            strcmp(name, "@lune/datetime") == 0 ||
+            strcmp(name, "@lune/serde") == 0 ||
+            strcmp(name, "@lune/task") == 0)
         {
             const char* source = embeddedModule(name);
             Luau::CompileOptions options;
