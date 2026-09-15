@@ -785,7 +785,15 @@ lumora.fs = {
     readDir = _fsReadDir, writeDir = makefolder, makeDir = makefolder,
     removeFile = delfile, removeDir = delfolder, remove = _fsRemove,
     isFile = isfile, isDir = isfolder, metadata = _fsMetadata,
-    copy = _fsCopy, move = _fsMove
+    copy = _fsCopy, move = _fsMove,
+    listDir = function(path)
+        local result = {}
+        for _, name in ipairs(_fsReadDir(path)) do
+            local child = _normalizePath((path or "") .. "/" .. name)
+            table.insert(result, { name = name, type = _files[child] ~= nil and "file" or "directory" })
+        end
+        return result
+    end
 }
 function lumora.fs.snapshot()
     local result = { files = {}, folders = {} }

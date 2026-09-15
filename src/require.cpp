@@ -143,13 +143,66 @@ static const char* embeddedModule(const char* name)
     if (strcmp(name, "@lumora/stdio") == 0)
         return "return {write=function(...) io.write(...) end,print=print,readLine=function() return io.read(\"*l\") end} \n";
     if (strcmp(name, "@lumora/process") == 0)
-        return "local h=__lumora_host; local p={}; p.args=arg; p.cwd=h.cwd; p.setCwd=h.setCwd; p.env=h.env; p.exec=h.exec; p.exit=function(code) error({__lumora_process_exit=code or 0}) end; return p\n";
+        return "local h=__lumora_host; local p={}; p.args=arg; p.cwd=h.cwd; p.setCwd=h.setCwd; p.env=h.env; p.exec=h.exec; p.run=h.exec; p.spawn=h.exec; p.pid=h.pid; p.execPath=h.execPath; p.kill=h.kill; p.exit=function(code) error({__lumora_process_exit=code or 0}) end; return p\n";
     if (strcmp(name, "@lumora/luau") == 0)
-        return "return {load=loadstring,compile=function(source) return loadstring(source) end}\n";
+        return R"LUMORA(local M = {}
+M.load = loadstring
+M.compile = function(source) return loadstring(source) end
+function M.resolveModule(path, fromchunkname)
+    assert(type(path) == "string", "module path must be a string")
+    if path:sub(1, 8) == "@lumora/" then return path end
+    assert(type(fromchunkname) == "string", "fromchunkname must be a string")
+    local root = fromchunkname:gsub("^@", "")
+    local wanted = path:gsub("^%./", "")
+    local graph = lumora.analysis.graph("@file:" .. root)
+    for _, edge in ipairs(graph.moduleEdges) do
+        if edge.from == root or edge.from:sub(-#root) == root then
+            if edge.to == path or edge.to:sub(-#wanted) == wanted or edge.to:sub(-#wanted - 5) == wanted .. ".luau" or edge.to:sub(-#wanted - 4) == wanted .. ".lua" then return edge.to end
+        end
+    end
+    return nil
+end
+function M.typeofModule(path, fromchunkname)
+    local resolved = M.resolveModule(path, fromchunkname)
+    if not resolved then return nil end
+    local ok, source = pcall(__lumora_host.readFile, resolved)
+    if not ok then return nil end
+    local expression = source:match("return%s+(.+)") or ""
+    if expression:match("^function") or expression:match("^function%s*%(") then return "function" end
+    if expression:match("^%{") then return "table" end
+    if expression:match('^[' .. '"' .. "']") then return "string" end
+    if expression:match("^%-?%d") then return "number" end
+    if expression:match("^true") or expression:match("^false") then return "boolean" end
+    return "unknown"
+end
+return M
+)LUMORA";
     if (strcmp(name, "@lumora/datetime") == 0)
-        return "local M={}\nfunction M.now() return os.time() end\nfunction M.fromUnix(ts) return os.date('!*t', ts) end\nfunction M.toUnix(t) return os.time(t) end\nfunction M.format(ts, fmt) return os.date(fmt or '!%Y-%m-%dT%H:%M:%SZ', ts or os.time()) end\nreturn M\n";
+        return "local M={}\nlocal function t(sec, utc) return os.date(utc and '!%Y-%m-%dT%H:%M:%SZ' or '%Y-%m-%dT%H:%M:%S', sec) end\nfunction M.now() return os.time() end\nfunction M.fromUnix(ts) return os.date('!*t', ts) end\nfunction M.fromUnixTimestamp(ts) return M.fromUnix(ts) end\nfunction M.fromLocalTime(t0) return os.time(t0) end\nfunction M.fromUniversalTime(t0) return os.time(t0) end\nfunction M.toUnix(t0) return type(t0)=='number' and t0 or os.time(t0) end\nfunction M.fromIsoDate(s) local y,mo,d,h,mi,se=s:match('^(%d%d%d%d)%-(%d%d)%-(%d%d)[T ](%d%d):(%d%d):(%d%d)'); assert(y,'invalid ISO date'); return os.time({year=tonumber(y),month=tonumber(mo),day=tonumber(d),hour=tonumber(h),min=tonumber(mi),sec=tonumber(se)}) end\nM.fromRfc3339=M.fromIsoDate\nfunction M.fromRfc2822(s) local d,mon,y,h,mi,se=s:match('(%d%d?) (%a%a%a) (%d%d%d%d) (%d%d):(%d%d):(%d%d)'); local months={Jan=1,Feb=2,Mar=3,Apr=4,May=5,Jun=6,Jul=7,Aug=8,Sep=9,Oct=10,Nov=11,Dec=12}; assert(d and months[mon],'invalid RFC2822 date'); return os.time({year=tonumber(y),month=months[mon],day=tonumber(d),hour=tonumber(h),min=tonumber(mi),sec=tonumber(se)}) end\nfunction M.format(ts,fmt) return os.date(fmt or '!%Y-%m-%dT%H:%M:%SZ', ts or os.time()) end\nfunction M.toIsoDate(ts) return t(ts or os.time(),true) end\nreturn M\n";
     if (strcmp(name, "@lumora/serde") == 0)
-        return "return {encode=function(value) return json.encode(value) end, decode=function(value) return json.decode(value) end, hash=function(value) local s=json.encode(value); local h=0; for i=1,#s do h=(h*31+s:byte(i))%4294967296 end; return string.format('%08x',h) end}\n";
+        return R"LUMORA(local M = {}
+M.encode = function(value) return json.encode(value) end
+M.decode = function(value) return json.decode(value) end
+M.hash = function(value) local s=json.encode(value); local h=0; for i=1,#s do h=(h*31+s:byte(i))%4294967296 end; return string.format('%08x',h) end
+function M.tomlDecode(src)
+    local out, current = {}, nil
+    for line in src:gmatch('[^\n]+') do
+        line = line:gsub('%s*#.*$', ''):gsub('^%s+', ''):gsub('%s+$', '')
+        if line ~= '' then
+            local section = line:match('^%[([^%]]+)%]$')
+            if section then current = out; for part in section:gmatch('[^%.]+') do current[part] = current[part] or {}; current = current[part] end
+            else
+                local k, v = line:match('^([%w_%-]+)%s*=%s*(.-)%s*$'); assert(k, 'invalid TOML line: '..line)
+                if v == 'true' then v=true elseif v == 'false' then v=false elseif v:sub(1,1) == '"' and v:sub(-1) == '"' then v=v:sub(2,-2) elseif v:sub(1,1) == '[' then local a={}; for item in v:sub(2,-2):gmatch('[^,]+') do item=item:gsub('^%s+',''):gsub('%s+$',''); if item:sub(1,1)=='"' then item=item:sub(2,-2) elseif item=='true' then item=true elseif item=='false' then item=false else item=tonumber(item) end; table.insert(a,item) end; v=a else v=tonumber(v) or v end
+                (current or out)[k] = v
+            end
+        end
+    end
+    return out
+end
+function M.tomlEncode(t) local lines={}; for k,v in pairs(t) do if type(v)~='table' then local x=type(v)=='string' and string.format('%q',v) or tostring(v); table.insert(lines,k..' = '..x) end end; return table.concat(lines,'\n')..'\n' end
+return M
+)LUMORA";
     if (strcmp(name, "@lumora/task") == 0)
         return "return {spawn=task.spawn,defer=task.defer,delay=task.delay,cancel=task.cancel,wait=task.wait,resume=task.resume,status=task.status}\n";
     if (strcmp(name, "@lumora/stringext") == 0) return kLumoraStringext;
@@ -195,7 +248,7 @@ static int embeddedRequire(lua_State* L)
         if (strcmp(name, "@lumora/fs") == 0)
         {
             lua_getglobal(L, "lumora"); lua_getfield(L, -1, "fs");
-            const char* fields[] = {"readFile", "writeFile", "appendFile", "readDir", "writeDir", "makeDir", "removeFile", "removeDir", "remove", "isFile", "isDir", "metadata", "copy", "move", nullptr};
+            const char* fields[] = {"readFile", "writeFile", "appendFile", "readDir", "writeDir", "makeDir", "removeFile", "removeDir", "remove", "isFile", "isDir", "metadata", "copy", "move", "listDir", "link", "symlink", nullptr};
             for (int i = 0; fields[i]; ++i) { lua_getfield(L, -1, fields[i]); lua_setfield(L, module, fields[i]); }
             lua_pop(L, 2);
         }
@@ -206,7 +259,7 @@ static int embeddedRequire(lua_State* L)
         }
         else if (strcmp(name, "@lumora/process") == 0)
         {
-            copyHostField(L, module, "cwd"); copyHostField(L, module, "setCwd"); copyHostField(L, module, "env"); copyHostField(L, module, "exec");
+            copyHostField(L, module, "cwd"); copyHostField(L, module, "setCwd"); copyHostField(L, module, "env"); copyHostField(L, module, "exec"); copyHostField(L, module, "pid"); copyHostField(L, module, "execPath"); copyHostField(L, module, "kill");
             lua_getglobal(L, "arg"); lua_setfield(L, module, "args");
             addFunction(L, module, "exit", hostProcessExit);
         }

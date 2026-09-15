@@ -9,8 +9,14 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <vector>
 #include <system_error>
 #include <sys/wait.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <signal.h>
+#include <cerrno>
+#include <cstring>
 
 namespace
 {
@@ -213,26 +219,20 @@ int hostMove(lua_State* L)
 
 int hostExec(lua_State* L)
 {
-    const char* program = luaL_checkstring(L, 1); std::string command = "'";
-    for (const char* p = program; *p; ++p) command += (*p == '\'' ? "'\\''" : std::string(1, *p));
-    command += "'";
-    if (lua_istable(L, 2))
-    {
-        const int count = int(lua_objlen(L, 2));
-        for (int i = 1; i <= count; ++i)
-        {
-            lua_rawgeti(L, 2, i); const char* argument = luaL_checkstring(L, -1); command += " '";
-            for (const char* p = argument; *p; ++p) command += (*p == '\'' ? "'\\''" : std::string(1, *p));
-            command += "'"; lua_pop(L, 1);
-        }
-    }
-    command += " 2>&1"; FILE* pipe = popen(command.c_str(), "r");
-    if (!pipe) { luaL_error(L, "could not start process '%s'", program); return 0; }
-    std::string output; char buffer[4096]; while (fgets(buffer, sizeof(buffer), pipe)) output += buffer;
-    const int status = pclose(pipe); const int exitCode = status == -1 ? -1 : (WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status));
-    lua_newtable(L); lua_pushlstring(L, output.data(), output.size()); lua_setfield(L, -2, "stdout");
-    lua_pushinteger(L, exitCode); lua_setfield(L, -2, "code"); lua_pushboolean(L, exitCode == 0); lua_setfield(L, -2, "ok"); return 1;
+    const char* program = luaL_checkstring(L, 1); std::vector<std::string> args; std::string cwd; bool shell = false;
+    if (lua_istable(L, 2)) for (int i = 1, n = int(lua_objlen(L, 2)); i <= n; ++i) { lua_rawgeti(L, 2, i); args.emplace_back(luaL_checkstring(L, -1)); lua_pop(L, 1); }
+    if (lua_istable(L, 3)) { lua_getfield(L, 3, "cwd"); if (!lua_isnil(L, -1)) cwd = luaL_checkstring(L, -1); lua_pop(L, 1); lua_getfield(L, 3, "shell"); shell = lua_toboolean(L, -1); lua_pop(L, 1); }
+    int outPipe[2], errPipe[2]; if (pipe(outPipe) || pipe(errPipe)) { luaL_error(L, "could not create process pipes"); return 0; }
+    pid_t pid = fork();
+    if (pid < 0) { luaL_error(L, "could not fork process"); return 0; }
+    if (pid == 0) { dup2(outPipe[1], STDOUT_FILENO); dup2(errPipe[1], STDERR_FILENO); close(outPipe[0]); close(outPipe[1]); close(errPipe[0]); close(errPipe[1]); if (!cwd.empty()) chdir(cwd.c_str()); std::vector<char*> av; av.push_back(const_cast<char*>(program)); for (auto& a : args) av.push_back(const_cast<char*>(a.c_str())); av.push_back(nullptr); if (shell) execl("/bin/sh", "sh", "-c", program, (char*)nullptr); else execvp(program, av.data()); _exit(127); }
+    close(outPipe[1]); close(errPipe[1]); std::string out, err; char buffer[4096]; ssize_t n; while ((n = read(outPipe[0], buffer, sizeof(buffer))) > 0) out.append(buffer, size_t(n)); while ((n = read(errPipe[0], buffer, sizeof(buffer))) > 0) err.append(buffer, size_t(n)); close(outPipe[0]); close(errPipe[0]); int status = 0; waitpid(pid, &status, 0); int code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0);
+    lua_newtable(L); lua_pushlstring(L, out.data(), out.size()); lua_setfield(L, -2, "stdout"); lua_pushlstring(L, err.data(), err.size()); lua_setfield(L, -2, "stderr"); lua_pushinteger(L, code); lua_setfield(L, -2, "code"); lua_pushinteger(L, pid); lua_setfield(L, -2, "pid"); lua_pushboolean(L, code == 0); lua_setfield(L, -2, "ok"); return 1;
 }
+
+int hostProcessPid(lua_State* L) { lua_pushinteger(L, getpid()); return 1; }
+int hostProcessExecPath(lua_State* L) { char path[4096]; ssize_t n = readlink("/proc/self/exe", path, sizeof(path)-1); if (n < 0) { lua_pushnil(L); return 1; } path[n] = 0; lua_pushstring(L, path); return 1; }
+int hostProcessKill(lua_State* L) { pid_t pid = luaL_checkinteger(L, 1); int sig = int(luaL_optinteger(L, 2, SIGTERM)); if (kill(pid, sig) != 0) { luaL_error(L, "could not signal process: %s", strerror(errno)); return 0; } lua_pushboolean(L, 1); return 1; }
 
 int hostReadDir(lua_State* L)
 {
@@ -245,6 +245,16 @@ int hostReadDir(lua_State* L)
     if (error) { luaL_error(L, "could not read directory '%s'", path); return 0; }
     return 1;
 }
+
+int hostListDir(lua_State* L)
+{
+    const char* path = luaL_optstring(L, 1, "."); std::error_code error; lua_newtable(L); int index = 1;
+    for (const auto& entry : std::filesystem::directory_iterator(path, error)) { lua_newtable(L); lua_pushstring(L, entry.path().filename().string().c_str()); lua_setfield(L, -2, "name"); auto st = entry.symlink_status(error); const char* type = std::filesystem::is_symlink(st) ? "symlink" : (std::filesystem::is_directory(st) ? "directory" : "file"); lua_pushstring(L, type); lua_setfield(L, -2, "type"); lua_rawseti(L, -2, index++); }
+    if (error) { luaL_error(L, "could not list directory '%s'", path); return 0; } return 1;
+}
+
+int hostLink(lua_State* L) { std::error_code e; std::filesystem::create_hard_link(luaL_checkstring(L, 1), luaL_checkstring(L, 2), e); if (e) { luaL_error(L, "could not create hard link: %s", e.message().c_str()); return 0; } return 0; }
+int hostSymlink(lua_State* L) { std::error_code e; std::filesystem::create_symlink(luaL_checkstring(L, 1), luaL_checkstring(L, 2), e); if (e) { luaL_error(L, "could not create symlink: %s", e.message().c_str()); return 0; } return 0; }
 
 int hostMakeDir(lua_State* L)
 {
@@ -319,5 +329,11 @@ void registerEmbeddedHost(lua_State* L)
     registerFunction(L, api, "setCwd", hostSetCwd);
     registerFunction(L, api, "env", hostEnv);
     registerFunction(L, api, "exec", hostExec);
+    registerFunction(L, api, "pid", hostProcessPid);
+    registerFunction(L, api, "execPath", hostProcessExecPath);
+    registerFunction(L, api, "kill", hostProcessKill);
+    registerFunction(L, api, "listDir", hostListDir);
+    registerFunction(L, api, "link", hostLink);
+    registerFunction(L, api, "symlink", hostSymlink);
     lua_setglobal(L, "__lumora_host");
 }
