@@ -2,6 +2,7 @@
 #include "lualib.h"
 #include "Luau/Compiler.h"
 #include "lumora.h"
+#include "analyzer.h"
 
 #include <chrono>
 #include <cstdio>
@@ -30,6 +31,22 @@ static constexpr const char* kVersion = "lumora 0.4.0";
 
 int main(int argc, char** argv)
 {
+    if (argc > 1 && (std::string(argv[1]) == "inspect" || std::string(argv[1]) == "deobfuscate" || std::string(argv[1]) == "report"))
+    {
+        AnalyzerOptions options;
+        const std::string command = argv[1];
+        for (int i = 2; i < argc; ++i)
+        {
+            const std::string arg = argv[i];
+            if (arg == "--json") options.json = true;
+            else if (arg == "--out" && i + 1 < argc) options.outputDir = argv[++i];
+            else if (arg.rfind("--", 0) == 0) { std::cerr << "unknown analyzer option: " << arg << "\n"; return 2; }
+            else if (options.input.empty()) options.input = arg;
+            else { std::cerr << "only one analyzer input is allowed\n"; return 2; }
+        }
+        if (options.input.empty()) { printAnalyzerHelp(); return 2; }
+        return runAnalyzerCommand(command, options);
+    }
     bool roblox = true, json = false, sandbox = false, visual = false;
     double timeout = 0.0;
     std::vector<char*> scriptArgs;

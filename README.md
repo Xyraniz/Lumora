@@ -208,6 +208,16 @@ The virtual filesystem supports `lumora.fs.snapshot()` and `lumora.fs.diff(befor
 
 The `lumora.capabilities()` result explicitly reports `analysis`, the dynamic-code policy, and process policy. These facilities do not grant network access or Roblox-client access: unavailable external behavior remains blocked and observable. They are intended to provide structured evidence to a human or another model rather than claim that a reconstructed script is identical to its original source.
 
+The local CLI exposes the complete static pipeline without network services:
+
+```bash
+lumora inspect suspicious.luau --json
+lumora report suspicious.luau --json
+lumora deobfuscate suspicious.luau --out analysis-output
+```
+
+The deobfuscation command writes `00-original.luau`, `01-strings-decoded.luau`, `02-constants-folded.luau`, `03-symbols-renamed.luau`, `04-reconstructed.luau`, `diff.json` and `report.json`. Transformations are conservative: dynamic code is reported, not executed automatically; external network and host filesystem access remain disabled by the runtime policy. The report records recovered strings, capability findings, function calls, recursively resolved local modules and circular dependencies.
+
 ### Player simulation for ESP tests
 
 To validate visual logic reproducibly, the prelude exposes `lumora.simulatePlayers(specs)`. It creates synthetic players and characters with `Head` and `HumanoidRootPart`, and fires `Players.PlayerAdded`; `lumora.resetSimulatedPlayers()` clears that state. `Highlight`, `BillboardGui` and `Drawing` are headless-observable objects: they allow asserting that an ESP is created, targets the correct character and is enabled, but do not draw or interact with a real client. The executable contract lives in `tests/simulated_players_esp.lua`.

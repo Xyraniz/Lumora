@@ -36,6 +36,7 @@ add_executable(lumora
     src/json.cpp
     src/host_api.cpp
     src/analysis.cpp
+    src/analyzer.cpp
 )
 if(LUMORA_VISUAL_AVAILABLE)
     target_sources(lumora PRIVATE src/visual.cpp)
@@ -94,6 +95,7 @@ if(BUILD_TESTING)
         add_test(NAME cli_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/cli_contract.sh $<TARGET_FILE:lumora>)
         add_test(NAME sandbox_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/sandbox_contract.sh $<TARGET_FILE:lumora>)
         add_test(NAME json_schema COMMAND ${CMAKE_SOURCE_DIR}/tests/json_schema.sh $<TARGET_FILE:lumora>)
+        add_test(NAME analyzer_cli COMMAND ${CMAKE_SOURCE_DIR}/tests/analyzer_cli.sh $<TARGET_FILE:lumora>)
         add_test(NAME differential_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/differential_contract.sh $<TARGET_FILE:lumora>)
     endif()
 endif()
