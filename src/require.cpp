@@ -136,11 +136,11 @@ static const char* embeddedModule(const char* name)
     if (strcmp(name, "@lumora/fs") == 0)
         return "return lumora.fs\n";
     if (strcmp(name, "@lune/fs") == 0)
-        return "local h=__lumora_lune; return {readFile=h.readFile,writeFile=h.writeFile,exists=h.exists,readDir=h.readDir,makeDir=h.makeDir,remove=h.remove,move=function(a,b) local d=h.readFile(a); h.writeFile(b,d); h.remove(a) end,copy=function(a,b) h.writeFile(b,h.readFile(a)) end,isFile=function(p) return h.exists(p) and true or false end,isDir=function(p) return h.exists(p) and true or false end} \n";
+        return "local h=__lumora_lune; return {readFile=h.readFile,writeFile=h.writeFile,exists=h.exists,isFile=h.isFile,isDir=h.isDir,readDir=h.readDir,makeDir=h.makeDir,remove=h.remove,move=h.move,copy=h.copy} \n";
     if (strcmp(name, "@lune/stdio") == 0)
         return "return {write=function(...) io.write(...) end,print=print,readLine=function() return io.read(\"*l\") end} \n";
     if (strcmp(name, "@lune/process") == 0)
-        return "local p={}; p.args=arg; p.cwd=__lumora_lune.cwd; p.setCwd=__lumora_lune.setCwd; p.env=__lumora_lune.env; p.exit=function(code) error({__lumora_process_exit=code or 0}) end; return p\n";
+        return "local h=__lumora_lune; local p={}; p.args=arg; p.cwd=h.cwd; p.setCwd=h.setCwd; p.env=h.env; p.exec=h.exec; p.exit=function(code) error({__lumora_process_exit=code or 0}) end; return p\n";
     if (strcmp(name, "@lune/luau") == 0)
         return "return {load=loadstring,compile=function(source) return loadstring(source) end}\n";
     if (strcmp(name, "@lumora/datetime") == 0)
@@ -199,12 +199,12 @@ static int embeddedRequire(lua_State* L)
         }
         else if (strcmp(name, "@lune/fs") == 0)
         {
-            const char* fields[] = {"readFile", "writeFile", "exists", "readDir", "makeDir", "remove", nullptr};
+            const char* fields[] = {"readFile", "writeFile", "exists", "isFile", "isDir", "readDir", "makeDir", "remove", "copy", "move", nullptr};
             for (int i = 0; fields[i]; ++i) copyHostField(L, module, fields[i]);
         }
         else if (strcmp(name, "@lune/process") == 0)
         {
-            copyHostField(L, module, "cwd"); copyHostField(L, module, "setCwd"); copyHostField(L, module, "env");
+            copyHostField(L, module, "cwd"); copyHostField(L, module, "setCwd"); copyHostField(L, module, "env"); copyHostField(L, module, "exec");
             lua_getglobal(L, "arg"); lua_setfield(L, module, "args");
             addFunction(L, module, "exit", luneProcessExit);
         }

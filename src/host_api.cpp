@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 #include <system_error>
+#include <sys/wait.h>
 
 namespace
 {
@@ -174,6 +175,62 @@ int lunePathExists(lua_State* L)
     lua_pushboolean(L, exists && !error); return 1;
 }
 
+int luneIsFile(lua_State* L)
+{
+    std::error_code error; const auto status = std::filesystem::status(luaL_checkstring(L, 1), error);
+    lua_pushboolean(L, !error && std::filesystem::is_regular_file(status)); return 1;
+}
+
+int luneIsDir(lua_State* L)
+{
+    std::error_code error; const auto status = std::filesystem::status(luaL_checkstring(L, 1), error);
+    lua_pushboolean(L, !error && std::filesystem::is_directory(status)); return 1;
+}
+
+int luneCopy(lua_State* L)
+{
+    const char* source = luaL_checkstring(L, 1); const char* destination = luaL_checkstring(L, 2);
+    std::error_code error; const auto status = std::filesystem::status(source, error);
+    if (error || !std::filesystem::exists(status)) { luaL_error(L, "source path does not exist: %s", source); return 0; }
+    const auto options = std::filesystem::is_directory(status)
+        ? std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing
+        : std::filesystem::copy_options::overwrite_existing;
+    std::filesystem::copy(source, destination, options, error);
+    if (error) { luaL_error(L, "could not copy '%s' to '%s': %s", source, destination, error.message().c_str()); return 0; }
+    return 0;
+}
+
+int luneMove(lua_State* L)
+{
+    const char* source = luaL_checkstring(L, 1); const char* destination = luaL_checkstring(L, 2);
+    std::error_code error; std::filesystem::rename(source, destination, error);
+    if (error) { luaL_error(L, "could not move '%s' to '%s': %s", source, destination, error.message().c_str()); return 0; }
+    return 0;
+}
+
+int luneExec(lua_State* L)
+{
+    const char* program = luaL_checkstring(L, 1); std::string command = "'";
+    for (const char* p = program; *p; ++p) command += (*p == '\'' ? "'\\''" : std::string(1, *p));
+    command += "'";
+    if (lua_istable(L, 2))
+    {
+        const int count = int(lua_objlen(L, 2));
+        for (int i = 1; i <= count; ++i)
+        {
+            lua_rawgeti(L, 2, i); const char* argument = luaL_checkstring(L, -1); command += " '";
+            for (const char* p = argument; *p; ++p) command += (*p == '\'' ? "'\\''" : std::string(1, *p));
+            command += "'"; lua_pop(L, 1);
+        }
+    }
+    command += " 2>&1"; FILE* pipe = popen(command.c_str(), "r");
+    if (!pipe) { luaL_error(L, "could not start process '%s'", program); return 0; }
+    std::string output; char buffer[4096]; while (fgets(buffer, sizeof(buffer), pipe)) output += buffer;
+    const int status = pclose(pipe); const int exitCode = status == -1 ? -1 : (WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status));
+    lua_newtable(L); lua_pushlstring(L, output.data(), output.size()); lua_setfield(L, -2, "stdout");
+    lua_pushinteger(L, exitCode); lua_setfield(L, -2, "code"); lua_pushboolean(L, exitCode == 0); lua_setfield(L, -2, "ok"); return 1;
+}
+
 int luneReadDir(lua_State* L)
 {
     const char* path = luaL_optstring(L, 1, "."); std::error_code error;
@@ -248,11 +305,16 @@ void registerEmbeddedLuneHost(lua_State* L)
     registerFunction(L, api, "readFile", luneReadFile);
     registerFunction(L, api, "writeFile", luneWriteFile);
     registerFunction(L, api, "exists", lunePathExists);
+    registerFunction(L, api, "isFile", luneIsFile);
+    registerFunction(L, api, "isDir", luneIsDir);
     registerFunction(L, api, "readDir", luneReadDir);
     registerFunction(L, api, "makeDir", luneMakeDir);
     registerFunction(L, api, "remove", luneRemove);
+    registerFunction(L, api, "copy", luneCopy);
+    registerFunction(L, api, "move", luneMove);
     registerFunction(L, api, "cwd", luneCwd);
     registerFunction(L, api, "setCwd", luneSetCwd);
     registerFunction(L, api, "env", luneEnv);
+    registerFunction(L, api, "exec", luneExec);
     lua_setglobal(L, "__lumora_lune");
 }
