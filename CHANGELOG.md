@@ -5,6 +5,8 @@ All notable changes to Lumora are documented in this file. The format is based o
 ## [Unreleased]
 
 ### Added
+- A deterministic cooperative scheduler with virtual time, deadline-aware `task.wait`, real `task.delay` scheduling, effective coroutine cancellation, direct-coroutine support in `task.resume`, `task.status`, and explicit next-cycle `task.defer`/`task.deferSelf` behavior.
+- `tests/scheduler_real_contract.lua`, covering delay deadlines, cancellation, elapsed wait values, defer boundaries, and completed-task status.
 - Deterministic headless `Workspace:Raycast` support against axis-aligned `BasePart` bounds. Results expose `Instance`, `Position`, `Distance`, `Normal`, `Material`, and the `RaycastResult` type marker.
 - `RaycastParams.FilterDescendantsInstances` support for both `Exclude` and `Include` filtering, with `CanCollide` respected during intersection tests.
 - `tests/raycast_contract.lua`, covering nearest-hit selection, distance, surface normals, and exclusion filtering.

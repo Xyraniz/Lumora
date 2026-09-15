@@ -87,12 +87,13 @@ This matrix documents the implementation status of each area of the Roblox API e
 
 | API | Status | Notes |
 | --- | --- | --- |
-| `task.spawn(fn, ...)` | ✅ | Executes immediately and enqueues the continuation. |
-| `task.defer(fn, ...)` | ✅ | Defers to the end of the current tick. |
-| `task.delay(seconds, fn, ...)` | ✅ | Schedules with simulated delay. |
+| `task.spawn(fn, ...)` | ✅ | Resumes immediately and enqueues the continuation at a cooperative yield. |
+| `task.defer(fn, ...)` | ✅ | Enqueues for the next cooperative cycle; top-level calls advance one zero-time cycle. |
+| `task.delay(seconds, fn, ...)` | ✅ | Schedules against deterministic virtual time and does not run before its deadline. |
 | `task.cancel(thread)` | ✅ | Cancels an enqueued thread. |
-| `task.wait(seconds)` | 🟡 | Returns immediately without real blocking. |
-| `task.resume(thread)` / `task.deferSelf()` | ✅ | Resumes a suspended thread or defers the current thread to the next cooperative tick. |
+| `task.wait(seconds)` | ✅ | Yields the current task until its virtual deadline and returns the requested elapsed duration. |
+| `task.resume(thread)` / `task.deferSelf()` | ✅ | Resumes registered or directly-created coroutines, or defers the current task to the next cooperative tick. |
+| `task.status(thread)` | ✅ | Reports the coroutine status, including completed and cancelled tasks. |
 | Task errors | ✅ | Errors from disconnected threads are returned by `task._runScheduler()` and fail execution if the runtime drains them without consuming. |
 | `spawn` / `delay` / `wait` (globals) | ✅ | Aliases for `task.*`. |
 | `RunService:BindToRenderStep` / `UnbindFromRenderStep` | ✅ | Callbacks execute in ascending priority order; equal priorities preserve bind order. The visual loop dispatches them before `RenderStepped`. |

@@ -374,15 +374,14 @@ function Random.new(seed)
 end
 
 local tasklib = {}
--- Scheduler: collects spawned/delayed coroutines. task.wait() yields,
--- and the scheduler resumes them after the main script body finishes.
--- This mirrors Roblox's cooperative scheduling model closely enough for
--- verification: the main script runs to completion (setting up UI, state,
--- connections), then spawned loops get a few resume cycles before we stop.
-tasklib._threads = {}      -- active coroutines waiting to be resumed
-tasklib._maxCycles = 50    -- safety: max scheduler iterations
+-- Deterministic cooperative scheduler. Time is virtual and advances only while
+-- the scheduler is running, so delayed work is real and testable without
+-- sleeping the host process. A task is resumed only after its wake time.
+tasklib._threads = {}
+tasklib._maxCycles = 50
 tasklib._cycleCount = 0
-tasklib._errors = {}       -- errors from detached task threads
+tasklib._errors = {}
+tasklib._now = 0
 
 local function rememberTaskError(err)
     table.insert(tasklib._errors, tostring(err))
@@ -394,83 +393,147 @@ local function makeTaskThread(routine)
     return coroutine.create(routine)
 end
 
-local function resumeTask(co, args)
-    if coroutine.status(co) == "dead" then return false end
-    local ok, err = coroutine.resume(co, table.unpack(args, 1, args.n))
+local function enqueue(co, args, wakeAt, readyCycle)
+    tasklib._threads[co] = {
+        args = args or table.pack(),
+        wakeAt = wakeAt or tasklib._now,
+        readyCycle = readyCycle or tasklib._cycleCount,
+        waiting = false,
+    }
+end
+
+local function resumeTask(co, record, resumeArgs)
+    if coroutine.status(co) == "dead" then
+        tasklib._threads[co] = nil
+        return false
+    end
+    local args = resumeArgs or record.args or table.pack()
+    local ok, yielded = coroutine.resume(co, table.unpack(args, 1, args.n))
     if not ok then
-        rememberTaskError(err)
+        rememberTaskError(yielded)
         tasklib._threads[co] = nil
         return false
     end
     if coroutine.status(co) == "dead" then
         tasklib._threads[co] = nil
+        return true
     end
+    local duration = 0
+    if type(yielded) == "table" and yielded.__task_wait then
+        duration = math.max(0, tonumber(yielded.duration) or 0)
+    end
+    record.args = table.pack(duration)
+    record.wakeAt = tasklib._now + duration
+    record.readyCycle = tasklib._cycleCount + 1
+    record.waiting = true
     return true
 end
 
 function tasklib.spawn(fn, ...)
     local co = makeTaskThread(fn)
-    local args = table.pack(...)
-    tasklib._threads[co] = args
-    -- Resume immediately up to the first yield (e.g. task.wait())
-    resumeTask(co, args)
+    local record = { args = table.pack(...), wakeAt = tasklib._now, readyCycle = tasklib._cycleCount, waiting = false }
+    tasklib._threads[co] = record
+    resumeTask(co, record)
+    return co
+end
+
+function tasklib.defer(fn, ...)
+    local co = makeTaskThread(fn)
+    enqueue(co, table.pack(...), tasklib._now, tasklib._cycleCount + 1)
+    -- At top level there is no host frame that will naturally advance the
+    -- cooperative loop, so perform exactly one zero-time scheduler turn.
+    -- Inside a running task, the readyCycle boundary preserves next-cycle
+    -- semantics and prevents re-entrant execution.
+    if not tasklib._inScheduler then tasklib._step(0) end
     return co
 end
 
 function tasklib.delay(seconds, fn, ...)
-    -- Keep delayed work pending until the scheduler. This preserves the
-    -- cancellation window expected by Roblox-style code and contracts.
+    assert(type(seconds) == "number", "task.delay expects seconds as a number")
     local co = makeTaskThread(fn)
-    tasklib._threads[co] = table.pack(...)
+    enqueue(co, table.pack(...), tasklib._now + math.max(0, seconds), tasklib._cycleCount)
     return co
 end
 
--- Lute exposes an explicit resume operation for suspended task threads.  The
--- result is the same thread handle, which makes it convenient to compose with
--- task.cancel and task.delay.
-function tasklib.resume(co)
+function tasklib.resume(co, ...)
     assert(type(co) == "thread", "task.resume expects a thread")
-    local args = tasklib._threads[co] or { n = 0 }
-    tasklib._threads[co] = args
-    resumeTask(co, args)
+    local record = tasklib._threads[co]
+    if not record then
+        -- task.resume also accepts a coroutine created directly with
+        -- coroutine.create, not only handles returned by task.spawn/delay.
+        if coroutine.status(co) ~= "dead" then
+            record = { args = table.pack(...), wakeAt = tasklib._now,
+                readyCycle = tasklib._cycleCount, waiting = false }
+            tasklib._threads[co] = record
+            resumeTask(co, record)
+        end
+        return co
+    end
+    record.wakeAt = tasklib._now
+    record.readyCycle = tasklib._cycleCount
+    resumeTask(co, record, table.pack(...))
     return co
 end
 
--- Yield the current task and let the scheduler pick it up on the next cycle.
 function tasklib.deferSelf()
-    coroutine.yield()
+    coroutine.yield({ __task_wait = true, duration = 0 })
 end
 
 function tasklib.cancel(co)
-    if type(co) == "thread" then
+    assert(type(co) == "thread", "task.cancel expects a thread")
+    local record = tasklib._threads[co]
+    if record then
         tasklib._threads[co] = nil
         pcall(coroutine.close, co)
     end
 end
 
-function tasklib.wait(seconds)
-    -- Yield back to the caller; the scheduler will resume us later.
-    coroutine.yield()
-    return seconds or 0
+function tasklib.status(co)
+    assert(type(co) == "thread", "task.status expects a thread")
+    if not tasklib._threads[co] then return coroutine.status(co) end
+    return "suspended"
 end
 
-function tasklib.defer(fn, ...) return tasklib.spawn(fn, ...) end
+function tasklib.wait(seconds)
+    seconds = math.max(0, tonumber(seconds) or 0)
+    local elapsed = coroutine.yield({ __task_wait = true, duration = seconds })
+    return tonumber(elapsed) or seconds
+end
 
--- Run the scheduler: resume all active threads a limited number of times.
--- This is called after the main script body executes.
-function tasklib._runScheduler()
-    for cycle = 1, tasklib._maxCycles do
-        tasklib._cycleCount = cycle
-        local anyAlive = false
-        for co, args in pairs(tasklib._threads) do
-            if coroutine.status(co) ~= "dead" then
-                anyAlive = true
-                resumeTask(co, args)
-            else
-                tasklib._threads[co] = nil
-            end
+function tasklib._step(delta)
+    tasklib._inScheduler = true
+    delta = math.max(0, tonumber(delta) or (1 / 60))
+    tasklib._now += delta
+    tasklib._cycleCount += 1
+    local progressed = false
+    local ready = {}
+    for co, record in pairs(tasklib._threads) do
+        if coroutine.status(co) == "dead" then
+            tasklib._threads[co] = nil
+        elseif record.wakeAt <= tasklib._now and record.readyCycle <= tasklib._cycleCount then
+            table.insert(ready, { co = co, record = record })
         end
-        if not anyAlive then break end
+    end
+    table.sort(ready, function(a, b) return tostring(a.co) < tostring(b.co) end)
+    for _, item in ipairs(ready) do
+        if tasklib._threads[item.co] == item.record then
+            progressed = true
+            resumeTask(item.co, item.record)
+        end
+    end
+    tasklib._inScheduler = false
+    return progressed
+end
+
+function tasklib._runScheduler()
+    for _ = 1, tasklib._maxCycles do
+        local nextWake = nil
+        for _, record in pairs(tasklib._threads) do
+            if not nextWake or record.wakeAt < nextWake then nextWake = record.wakeAt end
+        end
+        if not nextWake then break end
+        local delta = math.max(1 / 60, nextWake - tasklib._now)
+        tasklib._step(delta)
     end
     local errors = tasklib._errors
     tasklib._errors = {}

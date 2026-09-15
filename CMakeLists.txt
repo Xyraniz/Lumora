@@ -78,6 +78,7 @@ if(BUILD_TESTING)
     add_test(NAME lune_compat_contract COMMAND $<TARGET_FILE:lumora> run ${CMAKE_SOURCE_DIR}/tests/lune_compat_contract.lua)
     add_test(NAME sandbox_require_contract COMMAND $<TARGET_FILE:lumora> --sandbox ${CMAKE_SOURCE_DIR}/tests/sandbox_require_contract.lua)
     add_test(NAME scheduler_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/scheduler_contract.lua)
+    add_test(NAME scheduler_real_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/scheduler_real_contract.lua)
     add_test(NAME attached_library_load COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/examples/attached_library.lua)
     add_test(NAME roblox_parity COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/roblox_parity.lua)
 
