@@ -2,6 +2,13 @@
 
 This matrix documents the implementation status of each area of the Roblox API emulated by Lumora. The goal is not exhaustive parity with a specific Roblox version, but observable and reproducible compatibility sufficient to run and validate scripts in headless pipelines.
 
+## Independent standard modules
+
+Lumora provides `@lumora/datetime`, `@lumora/serde`, `@lumora/task`, and
+`@lumora/roblox` as virtual modules implemented inside this runtime. They do
+not import Lune code or depend on the Lune repository. The APIs are covered by
+`tests/standard_modules_contract.lua`.
+
 **Legend:**
 
 | Status | Meaning |

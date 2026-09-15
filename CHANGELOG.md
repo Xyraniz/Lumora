@@ -5,6 +5,8 @@ All notable changes to Lumora are documented in this file. The format is based o
 ## [Unreleased]
 
 ### Added
+- Independent virtual standard modules: `@lumora/datetime`, `@lumora/serde`, `@lumora/task`, and `@lumora/roblox`.
+- Contract coverage for timestamp formatting, deterministic serialization, scheduler access, and Roblox value exports.
 - A deterministic cooperative scheduler with virtual time, deadline-aware `task.wait`, real `task.delay` scheduling, effective coroutine cancellation, direct-coroutine support in `task.resume`, `task.status`, and explicit next-cycle `task.defer`/`task.deferSelf` behavior.
 - `tests/scheduler_real_contract.lua`, covering delay deadlines, cancellation, elapsed wait values, defer boundaries, and completed-task status.
 - Deterministic headless `Workspace:Raycast` support against axis-aligned `BasePart` bounds. Results expose `Instance`, `Position`, `Distance`, `Normal`, `Material`, and the `RaycastResult` type marker.
@@ -19,6 +21,8 @@ All notable changes to Lumora are documented in this file. The format is based o
 - Regression coverage for CFrame angle round-tripping and VirtualUser input dispatch in `tests/properties_contract.lua`.
 
 ### Changed
+- `lumora.capabilities().http` now reports `disabled` instead of the misleading `stub` label.
+- The new standard-module layer is implemented inside Lumora and has no dependency on or runtime reference to the Lune repository.
 - Repository documentation in `README.md`, `COMPATIBILITY.md`, and `CHANGELOG.md` is now written in technical English.
 - Compatibility documentation now describes the new orientation and virtual-input behavior.
 - The visual laboratory now dispatches bound render-step callbacks before `RenderStepped`, matching the expected frame lifecycle more closely.

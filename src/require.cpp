@@ -143,6 +143,14 @@ static const char* embeddedModule(const char* name)
         return "local p={}; p.args=arg; p.cwd=__lumora_lune.cwd; p.setCwd=__lumora_lune.setCwd; p.env=__lumora_lune.env; p.exit=function(code) error({__lumora_process_exit=code or 0}) end; return p\n";
     if (strcmp(name, "@lune/luau") == 0)
         return "return {load=loadstring,compile=function(source) return loadstring(source) end}\n";
+    if (strcmp(name, "@lumora/datetime") == 0)
+        return "local M={}\nfunction M.now() return os.time() end\nfunction M.fromUnix(ts) return os.date('!*t', ts) end\nfunction M.toUnix(t) return os.time(t) end\nfunction M.format(ts, fmt) return os.date(fmt or '!%Y-%m-%dT%H:%M:%SZ', ts or os.time()) end\nreturn M\n";
+    if (strcmp(name, "@lumora/serde") == 0)
+        return "return {encode=function(value) return json.encode(value) end, decode=function(value) return json.decode(value) end}\n";
+    if (strcmp(name, "@lumora/task") == 0)
+        return "local M={}\nfunction M.spawn(fn, ...) return task.spawn(fn, ...) end\nfunction M.defer(fn, ...) return task.defer(fn, ...) end\nfunction M.delay(seconds, fn, ...) return task.delay(seconds, fn, ...) end\nfunction M.cancel(thread) return task.cancel(thread) end\nfunction M.wait(seconds) return task.wait(seconds) end\nfunction M.run() return task._runScheduler() end\nreturn M\n";
+    if (strcmp(name, "@lumora/roblox") == 0)
+        return "return {game=game,workspace=workspace,Instance=Instance,Enum=Enum,Vector2=Vector2,Vector3=Vector3,CFrame=CFrame,Color3=Color3,UDim=UDim,UDim2=UDim2,Ray=Ray,Random=Random}\n";
     return nullptr;
 }
 
@@ -159,6 +167,19 @@ static int embeddedRequire(lua_State* L)
     const char* name = luaL_checkstring(L, 1);
     if (embeddedModule(name))
     {
+        if (strncmp(name, "@lumora/", 8) == 0)
+        {
+            const char* source = embeddedModule(name);
+            Luau::CompileOptions options;
+            options.optimizationLevel = 1;
+            options.debugLevel = 1;
+            const std::string bytecode = Luau::compile(source, options);
+            if (luau_load(L, name, bytecode.data(), bytecode.size(), 0) != 0)
+                lua_error(L);
+            if (lua_pcall(L, 0, 1, 0) != 0)
+                lua_error(L);
+            return 1;
+        }
         lua_newtable(L); const int module = lua_gettop(L);
         if (strcmp(name, "@lumora/fs") == 0)
         {

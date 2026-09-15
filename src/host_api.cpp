@@ -92,7 +92,7 @@ int capabilities(lua_State* L)
     setStringField(L, table, "clipboard", "memory");
     setBooleanField(L, table, "systemClipboardAvailable", systemClipboard);
     setStringField(L, table, "filesystem", "memory");
-    setStringField(L, table, "http", "stub");
+    setStringField(L, table, "http", "disabled");
     setStringField(L, table, "rendering", "headless");
     setStringField(L, table, "network", "disabled");
     setBooleanField(L, table, "debug", true);
