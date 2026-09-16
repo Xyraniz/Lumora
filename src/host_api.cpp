@@ -11,16 +11,82 @@
 #include <sstream>
 #include <vector>
 #include <system_error>
+#include <cerrno>
+#include <cstring>
+
+#if !defined(_WIN32)
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <signal.h>
-#include <cerrno>
-#include <cstring>
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <io.h>
+#include <fcntl.h>
+#endif
 
 namespace
 {
 std::string g_clipboard;
+
+#if defined(_WIN32)
+
+// Real Win32 clipboard integration. On a real desktop this behaves exactly
+// like the client does: the text becomes available to every other program
+// through the OS clipboard. When no interactive desktop session is present
+// (headless runners), the OS call fails and we report the memory clipboard.
+bool writeSystemClipboard(const std::string& text)
+{
+    if (!std::getenv("LUMORA_SYSTEM_CLIPBOARD")) return false;
+    if (!OpenClipboard(nullptr)) return false;
+    bool ok = false;
+    if (EmptyClipboard())
+    {
+        const SIZE_T bytes = (text.size() + 1) * sizeof(char);
+        HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+        if (memory)
+        {
+            if (char* destination = static_cast<char*>(GlobalLock(memory)))
+            {
+                memcpy(destination, text.data(), text.size() + 1);
+                GlobalUnlock(memory);
+                ok = SetClipboardData(CF_TEXT, memory) != nullptr;
+            }
+            if (!ok) GlobalFree(memory);
+        }
+    }
+    CloseClipboard();
+    return ok;
+}
+
+bool readSystemClipboard(std::string& output)
+{
+    if (!std::getenv("LUMORA_SYSTEM_CLIPBOARD")) return false;
+    if (!OpenClipboard(nullptr) || !IsClipboardFormatAvailable(CF_TEXT)) { CloseClipboard(); return false; }
+    bool ok = false;
+    if (HANDLE handle = GetClipboardData(CF_TEXT))
+    {
+        if (const char* source = static_cast<const char*>(GlobalLock(handle)))
+        {
+            const SIZE_T capacity = GlobalSize(handle);
+            size_t size = 0;
+            while (size < capacity && source[size] != '\0') ++size;
+            output.assign(source, size);
+            GlobalUnlock(handle);
+            ok = true;
+        }
+    }
+    CloseClipboard();
+    return ok;
+}
+
+#else
 
 bool writeSystemClipboard(const std::string& text)
 {
@@ -59,6 +125,8 @@ bool readSystemClipboard(std::string& output)
     }
     return false;
 }
+
+#endif
 
 int setClipboard(lua_State* L)
 {
@@ -222,17 +290,130 @@ int hostExec(lua_State* L)
     const char* program = luaL_checkstring(L, 1); std::vector<std::string> args; std::string cwd; bool shell = false;
     if (lua_istable(L, 2)) for (int i = 1, n = int(lua_objlen(L, 2)); i <= n; ++i) { lua_rawgeti(L, 2, i); args.emplace_back(luaL_checkstring(L, -1)); lua_pop(L, 1); }
     if (lua_istable(L, 3)) { lua_getfield(L, 3, "cwd"); if (!lua_isnil(L, -1)) cwd = luaL_checkstring(L, -1); lua_pop(L, 1); lua_getfield(L, 3, "shell"); shell = lua_toboolean(L, -1); lua_pop(L, 1); }
+
+#if defined(_WIN32)
+    // Real Win32 process spawn mirroring the POSIX fork/exec contract: the
+    // child inherits two real anonymous pipes as stdout/stderr, we drain both
+    // until the child exits, and the exit code maps exactly like WEXITSTATUS.
+    SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE outRead = nullptr, outWrite = nullptr, errRead = nullptr, errWrite = nullptr;
+    if (!CreatePipe(&outRead, &outWrite, &inheritable, 0) || !CreatePipe(&errRead, &errWrite, &inheritable, 0))
+    {
+        if (outRead) CloseHandle(outRead);
+        if (outWrite) CloseHandle(outWrite);
+        if (errRead) CloseHandle(errRead);
+        if (errWrite) CloseHandle(errWrite);
+        luaL_error(L, "could not create process pipes");
+        return 0;
+    }
+    SetHandleInformation(outRead, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(errRead, HANDLE_FLAG_INHERIT, 0);
+
+    std::string commandLine = shell ? std::string("cmd.exe /c ") + program : std::string(program);
+    if (!shell) for (const std::string& argument : args) commandLine += " " + argument;
+
+    STARTUPINFOA startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdOutput = outWrite;
+    startup.hStdError = errWrite;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, TRUE, 0, nullptr, cwd.empty() ? nullptr : cwd.c_str(), &startup, &process))
+    {
+        CloseHandle(outRead); CloseHandle(outWrite); CloseHandle(errRead); CloseHandle(errWrite);
+        luaL_error(L, "could not create process (Win32 error %lu)", GetLastError());
+        return 0;
+    }
+    CloseHandle(process.hThread);
+    // The parent must drop its copy of the write ends before draining or
+    // ReadFile would never report end-of-pipe.
+    CloseHandle(outWrite); CloseHandle(errWrite);
+
+    std::string out, err;
+    char buffer[4096];
+    HANDLE streams[2] = {outRead, errRead};
+    bool open[2] = {true, true};
+    while (open[0] || open[1])
+    {
+        bool progressed = false;
+        for (int stream = 0; stream < 2; ++stream)
+        {
+            if (!open[stream]) continue;
+            DWORD available = 0;
+            if (!PeekNamedPipe(streams[stream], nullptr, 0, nullptr, &available, nullptr))
+            {
+                CloseHandle(streams[stream]); open[stream] = false; progressed = true; continue;
+            }
+            if (available == 0) continue;
+            while (available > 0)
+            {
+                DWORD readBytes = 0;
+                if (!ReadFile(streams[stream], buffer, sizeof(buffer), &readBytes, nullptr) || readBytes == 0)
+                {
+                    CloseHandle(streams[stream]); open[stream] = false; break;
+                }
+                (stream == 0 ? out : err).append(buffer, readBytes);
+                available = available > readBytes ? available - readBytes : 0;
+                progressed = true;
+            }
+        }
+        if (!progressed) Sleep(5);
+    }
+    CloseHandle(outRead); CloseHandle(errRead);
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    GetExitCodeProcess(process.hProcess, &exitCode);
+    CloseHandle(process.hProcess);
+
+    lua_newtable(L); lua_pushlstring(L, out.data(), out.size()); lua_setfield(L, -2, "stdout"); lua_pushlstring(L, err.data(), err.size()); lua_setfield(L, -2, "stderr");
+    lua_pushinteger(L, int(exitCode)); lua_setfield(L, -2, "code");
+    lua_pushinteger(L, int(process.dwProcessId)); lua_setfield(L, -2, "pid");
+    lua_pushboolean(L, exitCode == 0); lua_setfield(L, -2, "ok");
+    return 1;
+#else
     int outPipe[2], errPipe[2]; if (pipe(outPipe) || pipe(errPipe)) { luaL_error(L, "could not create process pipes"); return 0; }
     pid_t pid = fork();
     if (pid < 0) { luaL_error(L, "could not fork process"); return 0; }
     if (pid == 0) { dup2(outPipe[1], STDOUT_FILENO); dup2(errPipe[1], STDERR_FILENO); close(outPipe[0]); close(outPipe[1]); close(errPipe[0]); close(errPipe[1]); if (!cwd.empty()) chdir(cwd.c_str()); std::vector<char*> av; av.push_back(const_cast<char*>(program)); for (auto& a : args) av.push_back(const_cast<char*>(a.c_str())); av.push_back(nullptr); if (shell) execl("/bin/sh", "sh", "-c", program, (char*)nullptr); else execvp(program, av.data()); _exit(127); }
     close(outPipe[1]); close(errPipe[1]); std::string out, err; char buffer[4096]; ssize_t n; while ((n = read(outPipe[0], buffer, sizeof(buffer))) > 0) out.append(buffer, size_t(n)); while ((n = read(errPipe[0], buffer, sizeof(buffer))) > 0) err.append(buffer, size_t(n)); close(outPipe[0]); close(errPipe[0]); int status = 0; waitpid(pid, &status, 0); int code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0);
     lua_newtable(L); lua_pushlstring(L, out.data(), out.size()); lua_setfield(L, -2, "stdout"); lua_pushlstring(L, err.data(), err.size()); lua_setfield(L, -2, "stderr"); lua_pushinteger(L, code); lua_setfield(L, -2, "code"); lua_pushinteger(L, pid); lua_setfield(L, -2, "pid"); lua_pushboolean(L, code == 0); lua_setfield(L, -2, "ok"); return 1;
+#endif
 }
 
+#if defined(_WIN32)
+int hostProcessPid(lua_State* L) { lua_pushinteger(L, int(GetCurrentProcessId())); return 1; }
+int hostProcessExecPath(lua_State* L)
+{
+    char path[MAX_PATH]; const DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (n == 0 || n >= sizeof(path)) { lua_pushnil(L); return 1; }
+    path[n] = 0; lua_pushstring(L, path); return 1;
+}
+int hostProcessKill(lua_State* L)
+{
+    const int pid = int(luaL_checkinteger(L, 1));
+    // The Luau-level default is SIGTERM (15); on Win32 every request maps to
+    // TerminateProcess — the client contract cares about the semantic
+    // (forceful termination), not the POSIX signal number.
+    const int sig = int(luaL_optinteger(L, 2, 15));
+    HANDLE process = pid == int(GetCurrentProcessId())
+        ? GetCurrentProcess()
+        : OpenProcess(PROCESS_TERMINATE, FALSE, DWORD(pid));
+    if (!process || process == INVALID_HANDLE_VALUE)
+    {
+        luaL_error(L, "could not signal process (Win32 error %lu)", GetLastError());
+        return 0;
+    }
+    const BOOL terminated = TerminateProcess(process, UINT(sig));
+    CloseHandle(process);
+    if (!terminated) { luaL_error(L, "could not signal process (Win32 error %lu)", GetLastError()); return 0; }
+    lua_pushboolean(L, 1); return 1;
+}
+#else
 int hostProcessPid(lua_State* L) { lua_pushinteger(L, getpid()); return 1; }
 int hostProcessExecPath(lua_State* L) { char path[4096]; ssize_t n = readlink("/proc/self/exe", path, sizeof(path)-1); if (n < 0) { lua_pushnil(L); return 1; } path[n] = 0; lua_pushstring(L, path); return 1; }
 int hostProcessKill(lua_State* L) { pid_t pid = luaL_checkinteger(L, 1); int sig = int(luaL_optinteger(L, 2, SIGTERM)); if (kill(pid, sig) != 0) { luaL_error(L, "could not signal process: %s", strerror(errno)); return 0; } lua_pushboolean(L, 1); return 1; }
+#endif
 
 int hostReadDir(lua_State* L)
 {

@@ -16,7 +16,7 @@
 #include <vector>
 #include <limits>
 #include <cmath>
-#if defined(__unix__)
+#if !defined(_WIN32)
 #include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -24,6 +24,13 @@
 #include <ctime>
 #include <io.h>
 #include <fcntl.h>
+// MSVC names the POSIX descriptor helpers with a leading underscore and
+// deprecates the plain names; MinGW only has the plain names.
+#if defined(_MSC_VER)
+#define lumoraFileno _fileno
+#else
+#define lumoraFileno fileno
+#endif
 #endif
 
 // Lumora semantic version — keep in sync with CHANGELOG.md.
@@ -149,7 +156,7 @@ int main(int argc, char** argv)
 
     try
     {
-#if defined(__unix__)
+#if !defined(_WIN32)
         // ── Unix path: fork + waitpid ───────────────────────────────────
         // True process isolation: the child runs the script with stdout/stderr
         // redirected to temp files, while the parent monitors for cooperative
@@ -213,8 +220,8 @@ int main(int argc, char** argv)
             // console; it loses JSON output in PowerShell, redirected CI, and
             // other non-console hosts. _dup/_dup2 restore the exact caller
             // destination instead.
-            const int savedOut = _dup(_fileno(stdout));
-            const int savedErr = _dup(_fileno(stderr));
+            const int savedOut = _dup(lumoraFileno(stdout));
+            const int savedErr = _dup(lumoraFileno(stderr));
             const bool capturedOut = savedOut != -1 && std::freopen(outPath, "w", stdout) != nullptr;
             const bool capturedErr = savedErr != -1 && std::freopen(errPath, "w", stderr) != nullptr;
             int code = 0;
@@ -231,9 +238,9 @@ int main(int argc, char** argv)
             if (capturedOut) std::fflush(stdout);
             if (capturedErr) std::fflush(stderr);
             // Restore original streams and read captured output.
-            if (capturedOut) { _dup2(savedOut, _fileno(stdout)); _close(savedOut); clearerr(stdout); }
+            if (capturedOut) { _dup2(savedOut, lumoraFileno(stdout)); _close(savedOut); clearerr(stdout); }
             else if (savedOut != -1) { _close(savedOut); }
-            if (capturedErr) { _dup2(savedErr, _fileno(stderr)); _close(savedErr); clearerr(stderr); }
+            if (capturedErr) { _dup2(savedErr, lumoraFileno(stderr)); _close(savedErr); clearerr(stderr); }
             else if (savedErr != -1) { _close(savedErr); }
             auto readText = [](const char* path) { std::ifstream f(path); std::ostringstream s; s << f.rdbuf(); return s.str(); };
             const std::string stdoutText = readText(outPath), stderrText = readText(errPath);
