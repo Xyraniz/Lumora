@@ -47,6 +47,15 @@ int main(int argc, char** argv)
             const std::string arg = argv[i];
             if (arg == "--json") options.json = true;
             else if (arg == "--out" && i + 1 < argc) options.outputDir = argv[++i];
+            else if (arg == "--deterministic-analysis") options.deterministic = true;
+            else if (arg == "--trace-globals") options.traceGlobals = true;
+            else if (arg == "--trace-indexes") options.traceIndexes = true;
+            else if (arg == "--trace-calls") options.traceCalls = true;
+            else if (arg == "--trace-vm") options.traceVm = true;
+            else if (arg == "--instruction-limit" && i + 1 < argc) options.instructionLimit = std::stoull(argv[++i]);
+            else if (arg == "--event-limit" && i + 1 < argc) options.eventLimit = std::stoull(argv[++i]);
+            else if (arg == "--output-limit" && i + 1 < argc) options.outputLimit = std::stoull(argv[++i]);
+            else if (arg == "--fixtures" && i + 1 < argc) options.fixtures = argv[++i];
             else if (arg.rfind("--", 0) == 0) { std::cerr << "unknown analyzer option: " << arg << "\n"; return 2; }
             else if (options.input.empty()) options.input = arg;
             else { std::cerr << "only one analyzer input is allowed\n"; return 2; }

@@ -335,6 +335,25 @@ UDim2 = {
     fromScale=function(x,y) return UDim2.new(x,0,y,0) end,
     fromOffset=function(x,y) return UDim2.new(0,x,0,y) end
 }
+local path2DControlPointMetatable = { __tostring=function(v)
+    local parts = {}
+    for i, value in ipairs(v.Arguments) do parts[i] = tostring(value) end
+    return "Path2DControlPoint(" .. table.concat(parts, ", ") .. ")"
+end, __eq=function(a,b)
+    if typeof(a) ~= "Path2DControlPoint" or typeof(b) ~= "Path2DControlPoint" then return false end
+    if #a.Arguments ~= #b.Arguments then return false end
+    for i=1,#a.Arguments do if a.Arguments[i] ~= b.Arguments[i] then return false end end
+    return true
+end }
+Path2DControlPoint = {
+    new=function(...)
+        local args = {...}
+        local point = {Arguments=args, __type="Path2DControlPoint"}
+        for i, value in ipairs(args) do point[i] = value end
+        setmetatable(point, path2DControlPointMetatable)
+        return point
+    end
+}
 Path2D = { new=function() return {ControlPoints={},__type="Path2D"} end }
 
 Random = {}

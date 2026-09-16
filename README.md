@@ -115,6 +115,20 @@ Protect a runner against non-terminating loops:
 
 A successful run yields `exitCode: 0` and `ok: true`. Script errors produce a response with `ok: false`; invalid options or CLI invocation errors use exit code `2`.
 
+### Deterministic virtualized-payload analysis
+
+Lumora includes a conservative, headless analysis pipeline for local Lua/Luau payloads. It does not download or execute remote content, does not create a Roblox client, and does not grant host networking, processes, teleportation or real filesystem access. The analyzer reuses the vendored Luau compiler/VM rather than embedding a second interpreter; Luau is MIT-licensed and remains the authoritative runtime component.
+
+```bash
+./bin/lumora deobfuscate fixture.luau --out analysis \
+  --deterministic-analysis --trace-globals --trace-indexes --trace-calls --trace-vm \
+  --instruction-limit 100000 --event-limit 10000 --output-limit 4194304
+```
+
+The command emits `trace.jsonl`, `constants.json`, `calls.json`, `blocked-capabilities.json`, `vm-ir.json`, `pseudocode.luau`, `reconstructed.luau`, the existing static transformation layers, `diff.json` and `report.json`. Events are line-oriented and bounded. The IR uses conservative `GETGLOBAL`, `GETTABLE` and `CALL` records with source line/PC references; pseudocode is explicitly inferred and does not claim to reproduce the original source or unexecuted paths. `--fixtures` is reserved for an explicit local fixture manifest; remote URLs are never fetched by this pipeline.
+
+The generic VM fixture in `tests/virtualized_analysis_fixture.luau` exercises a dispatcher with `Yt` handlers and registers, but is intentionally synthetic and local. It demonstrates why handler names such as `BV` are treated as evidence rather than hard-coded architecture. Analysis limits terminate collection cleanly while preserving artifacts already written; no stdout parsing is required.
+
 ### JSON schema
 
 With `--json`, Lumora always writes a single flat JSON object to stdout, without nesting JSON inside `stdout`. The same schema applies to all outcomes (success, load error, compile error, runtime error, timeout and invocation error), so any consumer can read it uniformly.
@@ -189,7 +203,7 @@ The following table summarizes the API covered by the current prelude. Compatibi
 | Events and signals | `Connect`, `Once`, `Disconnect`, `Connected`, `DisconnectAll`, `Fire`, `AttributeChanged`. |
 | Attributes | `GetAttribute` and `SetAttribute`. |
 | Enums | `Enum.X.Y`, `Name`, `EnumType`, `FromName`, `FromValue` and `Value`. |
-| Data types | `typeof`, `Vector2`, `Vector3`, `UDim`, `UDim2`, `CFrame`, `Color3`, `BrickColor`, `Ray`, `RaycastParams`, `NumberRange`, `NumberSequence`, `ColorSequence`, `Font`, `Rect`, `Path2D` and `TweenInfo`. |
+| Data types | `typeof`, `Vector2`, `Vector3`, `UDim`, `UDim2`, `CFrame`, `Color3`, `BrickColor`, `Ray`, `RaycastParams`, `NumberRange`, `NumberSequence`, `ColorSequence`, `Font`, `Rect`, `Path2D`, `Path2DControlPoint` and `TweenInfo`. |
 | Scheduling | Cooperative `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.resume`, `task.status`, `task.deferSelf`, and `task.wait`, plus the usual global aliases. Delays use deterministic virtual time, waits resume only at their deadlines, cancellation closes queued coroutines, and detached task errors are preserved and reported. `RunService:BindToRenderStep` callbacks run in deterministic priority order and can be removed with `UnbindFromRenderStep`. |
 | Environment and local compatibility | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv`, VM-backed raw metatables/read-only tables, local signal and instance reflection, tracked script source/closure/hash inspection, LZ4 compression, per-thread identity, visual FPS caps, and libcurl HTTP requests. Client-only hooks, teleporting, place serialization and physics contact injection raise explicit errors. |
 | Safe host capabilities | `setclipboard`/`getclipboard` in-memory by default; system clipboard opt-in via `LUMORA_SYSTEM_CLIPBOARD=1`, plus `getcallstack` and `lumora.capabilities()`. They do not access Roblox. |

@@ -136,7 +136,7 @@ static bool isRobloxValueType(const char* marker)
         "Vector2", "Vector3", "Color3", "CFrame", "UDim", "UDim2", "Ray",
         "RaycastParams", "NumberRange", "NumberSequence", "NumberSequenceKeypoint",
         "ColorSequence", "ColorSequenceKeypoint", "BrickColor", "TweenInfo",
-        "Font", "Rect", "Path2D", "PhysicalProperties", "Enums", "Enum",
+        "Font", "Rect", "Path2D", "Path2DControlPoint", "PhysicalProperties", "Enums", "Enum",
         "EnumItem", "Instance", "Random", "Drawing", "WindUIElement", "Tween",
         nullptr};
     for (int i = 0; kValueTypes[i]; ++i)
