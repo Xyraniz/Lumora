@@ -33,6 +33,7 @@
 #endif
 
 #if defined(__APPLE__)
+#include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <mach/mach_host.h>
 #include <sys/sysctl.h>
