@@ -44,6 +44,13 @@ static void stack_init(lua_State* L1, lua_State* L)
     // initialize first ci
     L1->ci->func = L1->top;
     L1->ci->p = nullptr;
+    // (Lumora) the CallInfo array comes from the allocator without zeroing;
+    // fully initialize the first frame so namecall tracking and flags can
+    // never read garbage from fresh memory
+    L1->ci->savedpc = NULL;
+    L1->ci->flags = 0;
+    L1->ci->nresults = 0;
+    L1->ci->namecallname = NULL;
     setnilvalue(L1->top++); // `function' entry for this `ci'
     L1->base = L1->ci->base = L1->top;
     L1->ci->top = L1->top + LUA_MINSTACK;
@@ -295,6 +302,8 @@ lua_State* lua_newstate(lua_Alloc allocator, void* ud)
         g->gray = NULL;
         g->grayagain = NULL;
         g->weak = NULL;
+        g->lumora_detourcount = 0;
+        g->lumora_detourtable = NULL;
         g->totalbytes = sizeof(LG);
         g->gcgoal = LUAI_GCGOAL;
         g->gcstepmul = LUAI_GCSTEPMUL;

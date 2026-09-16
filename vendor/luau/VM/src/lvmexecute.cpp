@@ -236,6 +236,7 @@ static LUAU_NOINLINE void luau_setupcci(lua_State* L, int nresults, StkId fun)
     ci->top = L->top + LUA_MINSTACK;
     ci->savedpc = NULL;
     ci->flags = 0;
+    ci->namecallname = NULL;
     ci->nresults = nresults;
 
     L->base = fun + 1;
@@ -939,41 +940,58 @@ reentry:
                 if (LUAU_LIKELY(ttistable(rb)))
                 {
                     LuaTable* h = hvalue(rb);
-                    // note: we can't use nodemask8 here because we need to query the main position of the table, and 8-bit nodemask8 only works
-                    // for predictive lookups
-                    LuaNode* n = &h->node[tsvalue(kv)->hash & (sizenode(h) - 1)];
 
-                    const TValue* mt = 0;
-                    const LuaNode* mtn = 0;
-
-                    // fast-path: key is in the table in expected slot
-                    if (ttisstring(gkey(n)) && tsvalue(gkey(n)) == tsvalue(kv) && !ttisnil(gval(n)))
+                    // (Lumora) table metatables may define __namecall exactly
+                    // like Roblox userdata; when present it takes precedence
+                    // over regular member lookup so that
+                    // hookmetamethod(obj, "__namecall", fn) intercepts every
+                    // obj:Method() dispatch, replicating the real client. The
+                    // invoked method name is staged for the frame that
+                    // luau_precall creates next, which is what
+                    // getnamecallmethod()/setnamecallmethod() read.
+                    if (const TValue* ncf = fasttm(L, h->metatable, TM_NAMECALL))
                     {
                         // note: order of copies allows rb to alias ra+1 or ra
                         setobj2s(L, ra + 1, rb);
-                        setobj2s(L, ra, gval(n));
-                    }
-                    // fast-path: key is absent from the base, table has an __index table, and it has the result in the expected slot
-                    else if (gnext(n) == 0 && (mt = fasttm(L, hvalue(rb)->metatable, TM_INDEX)) && ttistable(mt) &&
-                             (mtn = &hvalue(mt)->node[LUAU_INSN_C(insn) & hvalue(mt)->nodemask8]) && ttisstring(gkey(mtn)) &&
-                             tsvalue(gkey(mtn)) == tsvalue(kv) && !ttisnil(gval(mtn)))
-                    {
-                        // note: order of copies allows rb to alias ra+1 or ra
-                        setobj2s(L, ra + 1, rb);
-                        setobj2s(L, ra, gval(mtn));
+                        setobj2s(L, ra, ncf);
+                        L->namecallpending = tsvalue(kv);
                     }
                     else
                     {
-                        // slow-path: handles full table lookup
-                        setobj2s(L, ra + 1, rb);
-                        L->cachedslot = LUAU_INSN_C(insn);
-                        VM_PROTECT(luaV_gettable(L, rb, kv, ra));
-                        // save cachedslot to accelerate future lookups; patches currently executing instruction since pc-2 rolls back two pc++
-                        VM_PATCH_C(pc - 2, L->cachedslot);
-                        // recompute ra since stack might have been reallocated
-                        ra = VM_REG(LUAU_INSN_A(insn));
-                        if (ttisnil(ra))
-                            luaG_methoderror(L, ra + 1, tsvalue(kv));
+                        LuaNode* n = &h->node[tsvalue(kv)->hash & (sizenode(h) - 1)];
+
+                        const TValue* mt = 0;
+                        const LuaNode* mtn = 0;
+
+                        // fast-path: key is in the table in expected slot
+                        if (ttisstring(gkey(n)) && tsvalue(gkey(n)) == tsvalue(kv) && !ttisnil(gval(n)))
+                        {
+                            // note: order of copies allows rb to alias ra+1 or ra
+                            setobj2s(L, ra + 1, rb);
+                            setobj2s(L, ra, gval(n));
+                        }
+                        // fast-path: key is absent from the base, table has an __index table, and it has the result in the expected slot
+                        else if (gnext(n) == 0 && (mt = fasttm(L, hvalue(rb)->metatable, TM_INDEX)) && ttistable(mt) &&
+                                 (mtn = &hvalue(mt)->node[LUAU_INSN_C(insn) & hvalue(mt)->nodemask8]) && ttisstring(gkey(mtn)) &&
+                                 tsvalue(gkey(mtn)) == tsvalue(kv) && !ttisnil(gval(mtn)))
+                        {
+                            // note: order of copies allows rb to alias ra+1 or ra
+                            setobj2s(L, ra + 1, rb);
+                            setobj2s(L, ra, gval(mtn));
+                        }
+                        else
+                        {
+                            // slow-path: handles full table lookup
+                            setobj2s(L, ra + 1, rb);
+                            L->cachedslot = LUAU_INSN_C(insn);
+                            VM_PROTECT(luaV_gettable(L, rb, kv, ra));
+                            // save cachedslot to accelerate future lookups; patches currently executing instruction since pc-2 rolls back two pc++
+                            VM_PATCH_C(pc - 2, L->cachedslot);
+                            // recompute ra since stack might have been reallocated
+                            ra = VM_REG(LUAU_INSN_A(insn));
+                            if (ttisnil(ra))
+                                luaG_methoderror(L, ra + 1, tsvalue(kv));
+                        }
                     }
                 }
                 else
@@ -1084,6 +1102,21 @@ reentry:
                 }
 
                 Closure* ccl = clvalue(ra);
+                // (Lumora) executor-style detour: swap the target closure for
+                // its registered hook, unless a frame of the hook itself is
+                // active (that's the "original call" from inside the hook)
+                if (LUAU_UNLIKELY(ccl->hookslot != 0))
+                {
+                    if (const TValue* hook = lumora_getdetour(L, ccl))
+                    {
+                        for (CallInfo* ci = L->ci; ci > L->base_ci; ci--)
+                            if (ci->func && ttisfunction(ci->func) && clvalue(ci->func) == clvalue(hook))
+                                goto lumora_call_original;
+                        setobj2s(L, ra, hook);
+                        ccl = clvalue(ra);
+                    }
+                }
+            lumora_call_original:;
                 L->ci->savedpc = pc;
 
                 CallInfo* ci = incr_ci(L);
@@ -1095,6 +1128,17 @@ reentry:
                 ci->savedpc = NULL;
                 ci->flags = 0;
                 ci->nresults = nresults;
+                // (Lumora) frame entered right after a NAMECALL dispatch that
+                // staged a method name: record it so getnamecallmethod() and
+                // setnamecallmethod() reach it like Roblox does
+                if (L->namecallpending)
+                {
+                    ci->namecallname = L->namecallpending;
+                    ci->flags |= LUA_CALLINFO_NAMECALL;
+                    L->namecallpending = NULL;
+                }
+                else
+                    ci->namecallname = NULL;
 
                 L->base = ci->base;
                 L->top = argtop;
@@ -1188,6 +1232,21 @@ reentry:
                 }
 
                 Closure* ccl = clvalue(ra);
+                // (Lumora) executor-style detour: swap the target closure for
+                // its registered hook, unless a frame of the hook itself is
+                // active (that's the "original call" from inside the hook)
+                if (LUAU_UNLIKELY(ccl->hookslot != 0))
+                {
+                    if (const TValue* hook = lumora_getdetour(L, ccl))
+                    {
+                        for (CallInfo* ci = L->ci; ci > L->base_ci; ci--)
+                            if (ci->func && ttisfunction(ci->func) && clvalue(ci->func) == clvalue(hook))
+                                goto lumora_callfb_original;
+                        setobj2s(L, ra, hook);
+                        ccl = clvalue(ra);
+                    }
+                }
+            lumora_callfb_original:;
                 L->ci->savedpc = pc;
 
                 CallInfo* ci = incr_ci(L);
@@ -1199,6 +1258,17 @@ reentry:
                 ci->savedpc = NULL;
                 ci->flags = 0;
                 ci->nresults = nresults;
+                // (Lumora) frame entered right after a NAMECALL dispatch that
+                // staged a method name: record it so getnamecallmethod() and
+                // setnamecallmethod() reach it like Roblox does
+                if (L->namecallpending)
+                {
+                    ci->namecallname = L->namecallpending;
+                    ci->flags |= LUA_CALLINFO_NAMECALL;
+                    L->namecallpending = NULL;
+                }
+                else
+                    ci->namecallname = NULL;
 
                 L->base = ci->base;
                 L->top = argtop;
@@ -3053,7 +3123,10 @@ reentry:
                 luau_FastFunction f = luauF_table[bfid];
                 LUAU_ASSERT(f);
 
-                if (cl->env->safeenv)
+                // (Lumora) skip the builtin fastcall shortcut while any
+                // executor detour is registered; the fallback GETIMPORT+CALL
+                // path re-enters the interpreter and applies the detour swap
+                if (cl->env->safeenv && L->global->lumora_detourcount == 0)
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
@@ -3168,7 +3241,10 @@ reentry:
                 luau_FastFunction f = luauF_table[bfid];
                 LUAU_ASSERT(f);
 
-                if (cl->env->safeenv)
+                // (Lumora) skip the builtin fastcall shortcut while any
+                // executor detour is registered; the fallback GETIMPORT+CALL
+                // path re-enters the interpreter and applies the detour swap
+                if (cl->env->safeenv && L->global->lumora_detourcount == 0)
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
@@ -3218,7 +3294,10 @@ reentry:
                 luau_FastFunction f = luauF_table[bfid];
                 LUAU_ASSERT(f);
 
-                if (cl->env->safeenv)
+                // (Lumora) skip the builtin fastcall shortcut while any
+                // executor detour is registered; the fallback GETIMPORT+CALL
+                // path re-enters the interpreter and applies the detour swap
+                if (cl->env->safeenv && L->global->lumora_detourcount == 0)
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
@@ -3268,7 +3347,10 @@ reentry:
                 luau_FastFunction f = luauF_table[bfid];
                 LUAU_ASSERT(f);
 
-                if (cl->env->safeenv)
+                // (Lumora) skip the builtin fastcall shortcut while any
+                // executor detour is registered; the fallback GETIMPORT+CALL
+                // path re-enters the interpreter and applies the detour swap
+                if (cl->env->safeenv && L->global->lumora_detourcount == 0)
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
@@ -3319,7 +3401,10 @@ reentry:
                 luau_FastFunction f = luauF_table[bfid];
                 LUAU_ASSERT(f);
 
-                if (cl->env->safeenv)
+                // (Lumora) skip the builtin fastcall shortcut while any
+                // executor detour is registered; the fallback GETIMPORT+CALL
+                // path re-enters the interpreter and applies the detour swap
+                if (cl->env->safeenv && L->global->lumora_detourcount == 0)
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
@@ -3868,6 +3953,26 @@ int luau_precall(lua_State* L, StkId func, int nresults)
 
     Closure* ccl = clvalue(func);
 
+    // (Lumora) executor-style function detour: when a closure is hooked
+    // through lua_sethookclosure, calls that reach it through any reference
+    // (registers, upvalues, table fields, C API) are redirected to the hook
+    // closure instead. When the hook itself calls the original (common
+    // "old(...)" pattern), the detour is bypassed so the original runs once.
+    if (LUAU_UNLIKELY(ccl->hookslot != 0))
+    {
+        if (const TValue* hook = lumora_getdetour(L, ccl))
+        {
+            // detour is bypassed while any active frame is the hook closure
+            for (CallInfo* ci = L->ci; ci > L->base_ci; ci--)
+                if (ci->func && ttisfunction(ci->func) && clvalue(ci->func) == clvalue(hook))
+                    goto lumora_precall_original;
+
+            setobj2s(L, func, hook);
+            ccl = clvalue(func);
+        }
+    }
+lumora_precall_original:;
+
     CallInfo* ci = incr_ci(L);
     ci->func = func;
     if (FFlag::LuauCIProto)
@@ -3877,6 +3982,17 @@ int luau_precall(lua_State* L, StkId func, int nresults)
     ci->savedpc = NULL;
     ci->flags = 0;
     ci->nresults = nresults;
+    // (Lumora) frame entered right after a NAMECALL dispatch that staged a
+    // method name (via __namecall metamethod): record it so
+    // getnamecallmethod()/setnamecallmethod() reach it like Roblox does
+    if (L->namecallpending)
+    {
+        ci->namecallname = L->namecallpending;
+        ci->flags |= LUA_CALLINFO_NAMECALL;
+        L->namecallpending = NULL;
+    }
+    else
+        ci->namecallname = NULL;
 
     L->base = ci->base;
     // Note: L->top is assigned externally
@@ -3951,6 +4067,7 @@ void luau_pushhandlerci(lua_State* L, StkId funcslot, int errfunc, int nresults)
     ci->flags = LUA_CALLINFO_HANDLE | LUA_CALLINFO_PCALL;
     ci->nresults = nresults;
     ci->errfunc = errfunc;
+    ci->namecallname = NULL;
 
     // Note: L->top is assigned externally
 

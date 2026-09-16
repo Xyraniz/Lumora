@@ -34,6 +34,9 @@ LUAI_FUNC void luaV_tryfuncTM(lua_State* L, StkId func);
 LUAI_FUNC void luau_execute(lua_State* L);
 LUAI_FUNC void luau_finishop(lua_State* L);
 LUAI_FUNC int luau_precall(lua_State* L, struct lua_TValue* func, int nresults);
+// (Lumora) returns the registered detour closure for `c` (or NULL); defined
+// in lapi.cpp next to the detour registry
+LUAI_FUNC const TValue* lumora_getdetour(lua_State* L, const struct Closure* c);
 LUAI_FUNC void luau_pushhandlerci(lua_State* L, StkId funcslot, int errfunc, int nresults);
 LUAI_FUNC void luau_poscall(lua_State* L, StkId first);
 LUAI_FUNC void luau_pospcallsuccess(lua_State* L);

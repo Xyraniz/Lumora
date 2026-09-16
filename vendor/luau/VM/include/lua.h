@@ -176,6 +176,29 @@ LUA_API const char* lua_tolstring(lua_State* L, int idx, size_t* len);
 LUA_API const char* lua_tostringatom(lua_State* L, int idx, int* atom);
 LUA_API const char* lua_tolstringatom(lua_State* L, int idx, size_t* len, int* atom);
 LUA_API const char* lua_namecallatom(lua_State* L, int* atom);
+// (Lumora) returns the method name of the nearest active NAMECALL frame, or
+// NULL when no namecall dispatch is active (what getnamecallmethod reads)
+LUA_API const char* lua_activenamecallatom(lua_State* L);
+// (Lumora) rewrites the method name of the nearest active NAMECALL frame;
+// returns 1 when a frame was updated and 0 when there is no namecall frame
+// (what setnamecallmethod uses)
+LUA_API int lua_setnamecallatom(lua_State* L, const char* name);
+// (Lumora) registers/removes an executor-style detour: every call that reaches
+// `original` through any reference is redirected to `hook` instead. Pass NULL
+// to unregister. Returns the previous hook (or NULL).
+LUA_API const void* lua_sethookclosure(lua_State* L, int originalindex, int hookindex);
+// (Lumora) returns the registered detour for the function at idx, or NULL
+LUA_API const void* lua_gethookclosure(lua_State* L, int idx);
+// (Lumora) pushes the constants of the Lua function at idx (C closures have
+// none, returns -1); used by getconstants/debug.getconstants
+LUA_API int lua_getfunctionconstants(lua_State* L, int idx);
+// (Lumora) pushes fresh executable closures for the nested protos of the Lua
+// function at idx (C closures have none, returns -1); used by getprotos
+LUA_API int lua_getfunctionprotos(lua_State* L, int idx);
+// (Lumora) pushes a fresh copy of the function at idx (Lua or C closure) that
+// does not pass through any registered detour; hookfunction hands this back
+// as the "old function" so the hook can call the original body
+LUA_API void lua_clonefunctionany(lua_State* L, int idx);
 LUA_API int lua_objlen(lua_State* L, int idx);
 LUA_API lua_CFunction lua_tocfunction(lua_State* L, int idx);
 LUA_API void* lua_tolightuserdata(lua_State* L, int idx);

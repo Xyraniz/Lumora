@@ -69,6 +69,12 @@ typedef struct CallInfo
 
     int nresults;       // expected number of results from this function
     unsigned int flags; // call frame flags, see LUA_CALLINFO_*
+
+    // (Lumora) method name for frames entered through a NAMECALL dispatch;
+    // set by luau_precall when the dispatch staged L->namecallpending. NULL
+    // for regular frames. Anchored to the GC through the running Proto's
+    // constant table or luaS_fix (see lapi.cpp).
+    TString* namecallname;
 } CallInfo;
 // clang-format on
 
@@ -77,6 +83,9 @@ typedef struct CallInfo
 #define LUA_CALLINFO_NATIVE (1 << 2) // should this function be executed using execution callback for native code
 #define LUA_CALLINFO_OPYIELD (1 << 3) // call frame has yielded on a non-call opcode and requires luau_finishop
 #define LUA_CALLINFO_PCALL (1 << 4) // call frame was setup by a synthetic protected call and requires luau_pospcallsuccess
+// (Lumora) frame entered through a NAMECALL dispatch; the invoked method
+// name is available from lua_namecallatom while this frame is active
+#define LUA_CALLINFO_NAMECALL (1 << 5)
 
 #define curr_func(L) (clvalue(L->ci->func))
 #define ci_func(ci) (clvalue((ci)->func))
@@ -264,6 +273,16 @@ typedef struct global_State
     GCStats gcstats;
     uint32_t lastprotoid;
 
+    // (Lumora) number of executor-style detours currently registered; while
+    // nonzero, FASTCALL instructions degrade to the CALL path so hooked
+    // builtins cannot be bypassed by the builtin fastcall shortcut
+    int lumora_detourcount;
+
+    // (Lumora) cached pointer to the registry's "lumora_detours" table; NULL
+    // until the first hookfunction-style registration, letting the
+    // interpreter detour check run without any allocation or string lookups
+    struct LuaTable* lumora_detourtable;
+
 #ifdef LUAI_GCMETRICS
     GCMetrics gcmetrics;
 #endif
@@ -307,6 +326,11 @@ struct lua_State
     GCObject* gclist;
 
     TString* namecall; // when invoked from Luau using NAMECALL, what method do we need to invoke?
+    // (Lumora) method name staged by NAMECALL for the frame that is about to
+    // be created; consumed by luau_precall which flags the frame with
+    // LUA_CALLINFO_NAMECALL so getnamecallmethod()/setnamecallmethod() can
+    // locate the active namecall dispatch like Roblox does.
+    TString* namecallpending;
 
     void* userdata;
 };

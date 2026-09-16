@@ -200,6 +200,24 @@ instance_mt.__newindex = function(self, key, value)
     if old ~= value and self.Changed then self.Changed:Fire(key) end
 end
 
+-- Roblox instances dispatch obj:Method(...) through the engine's __namecall
+-- metamethod rather than a plain index+call. Replacing that dispatcher with
+-- hookmetamethod(obj, "__namecall", fn) and reading the method name with
+-- getnamecallmethod()/setnamecallmethod() is the core of every anti-kick
+-- and RemoteEvent logger, so Lumora replicates the dispatch path for real:
+-- the method is resolved through the same __index machinery the runtime
+-- uses everywhere, and the name is resolved at dispatch time (the VM keeps
+-- it available per-frame, exactly like the C++ client does).
+instance_mt.__namecall = function(self, ...)
+    local name = getnamecallmethod()
+    local method = rawget(instance_mt, "__index")(self, name)
+    if method == nil then
+        local className = rawget(self, "_properties") and rawget(self, "_properties").ClassName or "Instance"
+        error(("'%s' is not a valid member of '%s'"):format(name, className), 0)
+    end
+    return method(self, ...)
+end
+
 Instance = {}
 function Instance.new(className, parent)
     local o = setmetatable({ __type="Instance", _properties={

@@ -378,14 +378,185 @@ int makeWriteable(lua_State* L)
     return 0;
 }
 
-int hookUnavailable(lua_State* L)
+// hookfunction(original, hook) -> old : installs a real VM-level detour. Every
+// call that reaches `original` through any reference (globals, upvalues,
+// fields, bytecode CALL and NAMECALL dispatch) is redirected to `hook`. The
+// returned `old` is a fresh clone that runs the original body without the
+// detour, which is what the executor contract (Calamari: "returns a copy of
+// the original function") requires.
+int hookfunctionImpl(lua_State* L)
 {
-    return unsupported(L, lua_tostring(L, lua_upvalueindex(1)), "the Luau VM does not expose safe function or namecall patching");
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    // hook must be a function or nil/none (nil removes an existing detour,
+    // restoring calls to the original body)
+    if (lua_gettop(L) < 2 || (!lua_isfunction(L, 2) && !lua_isnoneornil(L, 2)))
+        return luaL_argerror(L, 2, "function or nil expected");
+
+    lua_sethookclosure(L, 1, lua_isnoneornil(L, 2) ? 0 : 2);
+    // hand back a detour-free clone of the original body: calling it from
+    // inside the hook must not re-enter the hook
+    lua_clonefunctionany(L, 1);
+    return 1;
 }
 
-int namecallUnavailable(lua_State* L)
+// hookmetamethod(obj, method, hook) -> old : detours a metamethod of obj (or
+int hookmetamethodImpl(lua_State* L)
 {
-    return unsupported(L, lua_tostring(L, lua_upvalueindex(1)), "Lumora does not implement Roblox __namecall dispatch");
+    luaL_checkany(L, 1);
+    size_t length = 0;
+    const char* method = luaL_checklstring(L, 2, &length);
+    // hook must be a function, or nil/none to restore the original
+    if (lua_gettop(L) < 3 || (!lua_isfunction(L, 3) && !lua_isnoneornil(L, 3)))
+        return luaL_argerror(L, 3, "function or nil expected");
+
+    // validate the metamethod name against the VM's tag-method list so
+    // nonexistent methods fail like on a real client, not silently
+    static const char* const kValid[] = {
+        "__index", "__newindex", "__call", "__concat", "__unm", "__add", "__sub",
+        "__mul", "__div", "__mod", "__pow", "__tostring", "__eq", "__lt", "__le",
+        "__iter", "__len", "__namecall", "__type", "__close",
+    };
+    bool valid = false;
+    for (const char* candidate : kValid)
+        if (std::strcmp(candidate, method) == 0)
+        {
+            valid = true;
+            break;
+        }
+    if (!valid)
+        return luaL_error(L, "hookmetamethod: '%s' is not a valid metamethod", method);
+
+    // resolve the metatable: obj's own, or the base-type metatable for
+    // primitives (matching getrawmetatable's view of the runtime)
+    if (!lua_getmetatable(L, 1))
+        return luaL_error(L, "hookmetamethod: cannot hook metamethod '%s' of a nil value", method);
+    const int metatable = lua_gettop(L);
+
+    lua_getfield(L, metatable, method);
+    if (!lua_isfunction(L, -1))
+    {
+        lua_pop(L, 2); // method value + metatable
+        return luaL_error(L, "hookmetamethod: metamethod '%s' is not defined", method);
+    }
+
+    // hook must be a function or nil/none (nil restores the original)
+    if (lua_gettop(L) < 3 || (!lua_isfunction(L, 3) && !lua_isnoneornil(L, 3)))
+    {
+        lua_pop(L, 2); // method value + metatable
+        return luaL_argerror(L, 3, "function or nil expected");
+    }
+
+    // stack: obj(1), method(2), hook(3), metatable(4), original metamethod(5)
+    lua_sethookclosure(L, lua_gettop(L), lua_isnoneornil(L, 3) ? 0 : 3); // detour original -> hook
+    lua_clonefunctionany(L, lua_gettop(L)); // clone of the original metamethod (detour-free)
+
+    // leave only the clone as the result
+    lua_replace(L, 3);
+    lua_settop(L, 3);
+    return 1;
+}
+
+// getnamecallmethod() -> string : the method name of the active NAMECALL
+// dispatch. Errors outside a namecall frame, matching real executors that
+// only expose it inside __namecall hooks (Sentinel docs).
+int getNamecallMethodImpl(lua_State* L)
+{
+    const char* name = lua_activenamecallatom(L);
+    if (!name)
+        return luaL_error(L, "getnamecallmethod is only available inside a namecall hook");
+    lua_pushstring(L, name);
+    return 1;
+}
+
+// setnamecallmethod(name) -> bool : rewrites the method the active NAMECALL
+// dispatch resolves; the engine dispatcher re-reads it, so calls can be
+// rerouted (Sentinel's FireServer -> InvokeServer example).
+int setNamecallMethodImpl(lua_State* L)
+{
+    size_t length = 0;
+    const char* name = luaL_checklstring(L, 1, &length);
+    if (length == 0)
+        return luaL_argerror(L, 1, "method name must not be empty");
+    lua_pushboolean(L, lua_setnamecallatom(L, name) != 0);
+    return 1;
+}
+
+// getconstants(f | level) -> { ... } : constant table of a Lua function (or
+// the function at stack level, aliasing debug.getconstants like Synapse X).
+// C closures have no constants: executors report an empty table.
+int getconstantsImpl(lua_State* L)
+{
+    luaL_checkany(L, 1);
+    if (lua_isnumber(L, 1))
+    {
+        const lua_Integer level = lua_tointeger(L, 1);
+        if (level < 0)
+            return luaL_argerror(L, 1, "level must be a non-negative integer");
+        lua_Debug ar{};
+        if (lua_getinfo(L, int(level), "f", &ar) == 0 || !lua_isfunction(L, -1))
+            return luaL_error(L, "getconstants: no function at level %d", int(level));
+    }
+    else if (!lua_isfunction(L, 1))
+        return luaL_argerror(L, 1, "function or level expected, got no value");
+
+    const int funcIndex = lua_gettop(L); // target function: arg 1 or pushed by getinfo
+    const int count = lua_getfunctionconstants(L, funcIndex);
+    if (count < 0)
+    {
+        lua_settop(L, funcIndex - 1); // drop the pushed function
+        lua_newtable(L);
+        return 1;
+    }
+
+    lua_createtable(L, count, 0);
+    const int output = lua_gettop(L);
+    // constants sit at funcIndex+1 .. funcIndex+count; fill in reverse so
+    // rawseti pops the right value each time
+    for (int i = count; i >= 1; --i)
+    {
+        lua_pushvalue(L, funcIndex + i);
+        lua_rawseti(L, output, i);
+    }
+    lua_settop(L, output);
+    return 1;
+}
+
+// getprotos(f | level) -> { functions } : fresh executable closures for the
+// nested protos (local functions) of a Lua function, in definition order
+// (Sentinel docs). C closures have no nested protos: empty table.
+int getprotosImpl(lua_State* L)
+{
+    luaL_checkany(L, 1);
+    if (lua_isnumber(L, 1))
+    {
+        const lua_Integer level = lua_tointeger(L, 1);
+        if (level < 0)
+            return luaL_argerror(L, 1, "level must be a non-negative integer");
+        lua_Debug ar{};
+        if (lua_getinfo(L, int(level), "f", &ar) == 0 || !lua_isfunction(L, -1))
+            return luaL_error(L, "getprotos: no function at level %d", int(level));
+    }
+    else if (!lua_isfunction(L, 1))
+        return luaL_argerror(L, 1, "function or level expected, got no value");
+
+    const int funcIndex = lua_gettop(L);
+    const int count = lua_getfunctionprotos(L, funcIndex);
+    if (count < 0)
+    {
+        lua_settop(L, funcIndex - 1);
+        lua_newtable(L);
+        return 1;
+    }
+
+    lua_createtable(L, count, 0);
+    const int output = lua_gettop(L);
+    for (int i = count; i >= 1; --i)
+    {
+        lua_pushvalue(L, funcIndex + i);
+        lua_rawseti(L, output, i);
+    }
+    lua_settop(L, output);
+    return 1;
 }
 
 int compileScriptBytecode(lua_State* L)
@@ -1035,29 +1206,18 @@ void registerExecutorCompatibilityGlobals(lua_State* L)
     registerFunction(L, LUA_GLOBALSINDEX, "make_writeable", makeWriteable);
     registerFunction(L, LUA_GLOBALSINDEX, "makewriteable", makeWriteable);
 
-    lua_pushstring(L, "hookfunction");
-    lua_pushcclosure(L, hookUnavailable, "hookfunction", 1);
-    lua_setglobal(L, "hookfunction");
-    lua_pushstring(L, "hookmetamethod");
-    lua_pushcclosure(L, hookUnavailable, "hookmetamethod", 1);
-    lua_setglobal(L, "hookmetamethod");
-    lua_pushstring(L, "getnamecallmethod");
-    lua_pushcclosure(L, namecallUnavailable, "getnamecallmethod", 1);
-    lua_setglobal(L, "getnamecallmethod");
-    lua_pushstring(L, "setnamecallmethod");
-    lua_pushcclosure(L, namecallUnavailable, "setnamecallmethod", 1);
-    lua_setglobal(L, "setnamecallmethod");
+    registerFunction(L, LUA_GLOBALSINDEX, "hookfunction", hookfunctionImpl);
+    registerFunction(L, LUA_GLOBALSINDEX, "hookfunc", hookfunctionImpl); // Synapse X alias
+    registerFunction(L, LUA_GLOBALSINDEX, "hookmetamethod", hookmetamethodImpl);
+    registerFunction(L, LUA_GLOBALSINDEX, "getnamecallmethod", getNamecallMethodImpl);
+    registerFunction(L, LUA_GLOBALSINDEX, "setnamecallmethod", setNamecallMethodImpl);
 
     registerFunction(L, LUA_GLOBALSINDEX, "getscriptbytecode", compileScriptBytecode);
     registerFunction(L, LUA_GLOBALSINDEX, "decompile", decompileScript);
     registerFunction(L, LUA_GLOBALSINDEX, "getscriptclosure", getScriptClosure);
     registerFunction(L, LUA_GLOBALSINDEX, "getupvalues", getUpvalues);
-    lua_pushstring(L, "getconstants");
-    lua_pushcclosure(L, unsupportedVmReflection, "getconstants", 1);
-    lua_setglobal(L, "getconstants");
-    lua_pushstring(L, "getprotos");
-    lua_pushcclosure(L, unsupportedVmReflection, "getprotos", 1);
-    lua_setglobal(L, "getprotos");
+    registerFunction(L, LUA_GLOBALSINDEX, "getconstants", getconstantsImpl);
+    registerFunction(L, LUA_GLOBALSINDEX, "getprotos", getprotosImpl);
     registerFunction(L, LUA_GLOBALSINDEX, "getcallbackvalue", getCallbackValue);
 
     registerFunction(L, LUA_GLOBALSINDEX, "getinstances", getInstances);

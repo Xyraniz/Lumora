@@ -676,6 +676,7 @@ LUAU_NOINLINE void luaV_callTM(lua_State* L, int nparams, int res)
     ci->savedpc = NULL;
     ci->flags = 0;
     ci->nresults = (res >= 0);
+    ci->namecallname = NULL;
     LUAU_ASSERT(ci->top <= L->stack_last);
 
     LUAU_ASSERT(ttisfunction(ci->func));

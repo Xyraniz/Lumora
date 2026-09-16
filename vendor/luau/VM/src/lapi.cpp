@@ -564,6 +564,230 @@ const char* lua_namecallatom(lua_State* L, int* atom)
     return getstr(s);
 }
 
+// (Lumora) ---------------------------------------------------------------
+// Executor detour registry: pairs original Closure* -> hook closure are kept
+// in a table inside the registry (a GC root), keyed with tagged light
+// userdata so the lookup never allocates and never collides with embedder
+// pointer keys.
+static const int kLumoraDetourTag = 0x4C554D31; // "LUM1"
+
+static LuaTable* getdetourtable(lua_State* L)
+{
+    // cached pointer kept on global_State so the interpreter-side detour
+    // check never performs string lookups or allocations
+    if (L->global->lumora_detourtable)
+        return L->global->lumora_detourtable;
+
+    const TValue* v = luaH_getstr(hvalue(registry(L)), luaS_newliteral(L, "lumora_detours"));
+    if (v != luaO_nilobject && ttistable(v))
+    {
+        L->global->lumora_detourtable = hvalue(v);
+        return hvalue(v);
+    }
+
+    LuaTable* t = luaH_new(L, 0, 8);
+    sethvalue(L, luaH_setstr(L, hvalue(registry(L)), luaS_newliteral(L, "lumora_detours")), t);
+    L->global->lumora_detourtable = t;
+    return t;
+}
+
+const TValue* lumora_getdetour(lua_State* L, const Closure* c)
+{
+    // allocation-free: reads only from the cached registry table, safe to
+    // call from inside the interpreter loop
+    LuaTable* t = L->global->lumora_detourtable;
+    if (!t)
+        return NULL;
+    const TValue* v = luaH_getp(t, const_cast<Closure*>(c), kLumoraDetourTag);
+    if (v == luaO_nilobject || !ttistable(v))
+        return NULL;
+    // record layout: [1] = original (anchor), [2] = detour closure
+    const TValue* hook = luaH_getnum(hvalue(v), 2);
+    if (hook == luaO_nilobject || !ttisfunction(hook))
+        return NULL;
+    return hook;
+}
+
+// (Lumora) walks the call stack for the nearest frame entered through a
+// NAMECALL dispatch and returns its recorded method name, mirroring what
+// getnamecallmethod() exposes on real executor runtimes
+const char* lua_activenamecallatom(lua_State* L)
+{
+    for (CallInfo* ci = L->ci; ci > L->base_ci; ci--)
+        if ((ci->flags & LUA_CALLINFO_NAMECALL) && ci->namecallname)
+            return getstr(ci->namecallname);
+    return NULL;
+}
+
+// (Lumora) rewrites the method name recorded on the nearest NAMECALL frame;
+// the original dispatcher reads the updated name afterwards, which is the
+// observable effect of setnamecallmethod() on a real client. Returns 1 when
+// a frame was updated and 0 when no namecall frame is active.
+int lua_setnamecallatom(lua_State* L, const char* name)
+{
+    for (CallInfo* ci = L->ci; ci > L->base_ci; ci--)
+    {
+        if ((ci->flags & LUA_CALLINFO_NAMECALL) && ci->namecallname)
+        {
+            // pin the string: the frame outlives the caller's references
+            TString* ts = luaS_new(L, name);
+            luaS_fix(ts);
+            ci->namecallname = ts;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+const void* lua_sethookclosure(lua_State* L, int originalindex, int hookindex)
+{
+    StkId o = index2addr(L, originalindex);
+    api_check(L, isLfunction(o) || (ttisfunction(o) && clvalue(o)->isC));
+    api_check(L, !hookindex || (isLfunction(index2addr(L, hookindex)) || (ttisfunction(index2addr(L, hookindex)) && clvalue(index2addr(L, hookindex))->isC)));
+
+    Closure* original = clvalue(o);
+
+    // nil at the hook index (or hookindex == 0) removes an existing detour
+    StkId h = hookindex ? index2addr(L, hookindex) : NULL;
+    Closure* hook = NULL;
+    if (h)
+    {
+        if (ttisnil(h))
+            hook = NULL;
+        else if (ttisfunction(h))
+            hook = clvalue(h);
+        else
+            luaG_runerror(L, "hook must be a function or nil");
+    }
+
+    if (hook == original)
+        luaG_runerror(L, "hook closure must differ from the original closure");
+
+    LuaTable* t = getdetourtable(L);
+
+    // previous hook, if any, lives at entry[2] of the record stored under the
+    // original closure's tagged lightuserdata key
+    const TValue* prevrec = luaH_getp(t, original, kLumoraDetourTag);
+    const void* prevfn = NULL;
+    if (prevrec != luaO_nilobject && ttistable(prevrec))
+    {
+        const TValue* e2 = luaH_getnum(hvalue(prevrec), 2);
+        if (e2 != luaO_nilobject && ttisfunction(e2))
+            prevfn = clvalue(e2);
+    }
+
+    if (hook)
+    {
+        // entry anchors both closures: [1] = original (prevents address reuse
+        // after GC recycling from producing phantom hits), [2] = hook
+        LuaTable* rec = luaH_new(L, 0, 4);
+        setclvalue(L, luaH_setnum(L, rec, 1), original);
+        setclvalue(L, luaH_setnum(L, rec, 2), hook);
+        sethvalue(L, luaH_setp(L, t, original, kLumoraDetourTag), rec);
+        TValue rectv;
+        sethvalue(L, &rectv, rec);
+        luaC_barriert(L, t, &rectv);
+
+        if (original->hookslot == 0)
+            L->global->lumora_detourcount++;
+        original->hookslot = 1;
+    }
+    else
+    {
+        if (original->hookslot != 0)
+        {
+            L->global->lumora_detourcount--;
+            LUAU_ASSERT(L->global->lumora_detourcount >= 0);
+        }
+        luaH_setp(L, t, original, kLumoraDetourTag)->tt = LUA_TNIL;
+        original->hookslot = 0;
+    }
+
+    return prevfn;
+}
+
+const void* lua_gethookclosure(lua_State* L, int idx)
+{
+    StkId o = index2addr(L, idx);
+    api_check(L, ttisfunction(o));
+
+    Closure* original = clvalue(o);
+    if (original->hookslot == 0)
+        return NULL;
+
+    const TValue* v = luaH_getp(getdetourtable(L), original, kLumoraDetourTag);
+    if (v == luaO_nilobject || !ttistable(v))
+        return NULL;
+    const TValue* hook = luaH_getnum(hvalue(v), 2);
+    if (hook == luaO_nilobject || !ttisfunction(hook))
+        return NULL;
+    return clvalue(hook);
+}
+
+// (Lumora) stages the namecall method for the frame that is about to be
+// created by a NAMECALL dispatch; consumed by the frame-setup code in
+// lvmexecute.cpp. The staged string comes from the running Proto's constant
+// table or is pinned with luaS_fix, so it stays alive for the frame.
+void lumora_stagenamecall(lua_State* L, TString* name)
+{
+    L->namecallpending = name;
+}
+
+// (Lumora) executor-style reflection: pushes the constant table of the Lua
+// function at index idx (or referenced by stack level for debug.getconstants)
+// onto the stack. Returns the number of pushed constants, or -1 when the
+// value is not a Lua function (C closures carry no constant table: executors
+// return an empty table for them, handled by the caller).
+int lua_getfunctionconstants(lua_State* L, int idx)
+{
+    StkId o = index2addr(L, idx);
+    api_check(L, ttisfunction(o));
+
+    Closure* cl = clvalue(o);
+    if (cl->isC)
+        return -1;
+
+    Proto* p = cl->l.p;
+    ensure_stack(L, p->sizek);
+    luaC_threadbarrier(L);
+    for (int i = 0; i < p->sizek; ++i)
+    {
+        // direct TValue copy preserves integer vs double vs vector vs string
+        // representations exactly as the constant table holds them
+        setobj2s(L, L->top, &p->k[i]);
+        api_incr_top(L);
+    }
+    return p->sizek;
+}
+
+// (Lumora) executor-style reflection: pushes fresh closures for every nested
+// proto of the Lua function at index idx; each closure is executable, exactly
+// like debug.getprotos on real executors. Returns the number of protos, or -1
+// when the value is not a Lua function (C closures have no nested protos).
+int lua_getfunctionprotos(lua_State* L, int idx)
+{
+    StkId o = index2addr(L, idx);
+    api_check(L, ttisfunction(o));
+
+    Closure* cl = clvalue(o);
+    if (cl->isC)
+        return -1;
+
+    Proto* p = cl->l.p;
+    ensure_stack(L, p->sizep);
+    luaC_threadbarrier(L);
+    for (int i = 0; i < p->sizep; ++i)
+    {
+        Closure* sub = luaF_newLclosure(L, p->p[i]->nups, L->gt, p->p[i]);
+        for (int u = 0; u < p->p[i]->nups; ++u)
+            setnilvalue(&sub->l.uprefs[u]);
+        setclvalue(L, L->top, sub);
+        api_incr_top(L);
+    }
+    return p->sizep;
+}
+// (Lumora) ---------------------------------------------------------------
+
 const LUA_VECTOR_TYPE* lua_tovector(lua_State* L, int idx)
 {
     StkId o = index2addr(L, idx);
@@ -2081,6 +2305,40 @@ void lua_clonefunction(lua_State* L, int idx)
         setobj2n(L, &newcl->l.uprefs[i], &cl->l.uprefs[i]);
     setclvalue(L, L->top, newcl);
     api_incr_top(L);
+}
+
+// (Lumora) executor hookfunction contract: the "old function" handed back to
+// the script must be a distinct closure that runs the original body without
+// passing through the detour again; real executors clone Lua and C closures
+// alike for this. Cloning C closures (builtin like print) replicates that.
+void lua_clonefunctionany(lua_State* L, int idx)
+{
+    luaC_checkGC(L);
+    luaC_threadbarrier(L);
+    ensure_stack(L, 1);
+    StkId p = index2addr(L, idx);
+    api_check(L, ttisfunction(p));
+    Closure* cl = clvalue(p);
+    if (cl->isC)
+    {
+        Closure* newcl = luaF_newCclosure(L, cl->nupvalues, L->gt);
+        newcl->c.f = cl->c.f;
+        newcl->c.cont = cl->c.cont;
+        newcl->c.debugname = cl->c.debugname;
+        newcl->c.debugname_DEPRECATED = cl->c.debugname_DEPRECATED;
+        for (int i = 0; i < cl->nupvalues; ++i)
+            setobj2n(L, &newcl->c.upvals[i], &cl->c.upvals[i]);
+        setclvalue(L, L->top, newcl);
+        api_incr_top(L);
+    }
+    else
+    {
+        Closure* newcl = luaF_newLclosure(L, cl->nupvalues, L->gt, cl->l.p);
+        for (int i = 0; i < cl->nupvalues; ++i)
+            setobj2n(L, &newcl->l.uprefs[i], &cl->l.uprefs[i]);
+        setclvalue(L, L->top, newcl);
+        api_incr_top(L);
+    }
 }
 
 int lua_usesexport(lua_State* L, int idx)

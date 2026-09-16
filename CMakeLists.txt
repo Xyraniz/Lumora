@@ -46,7 +46,7 @@ else()
     target_sources(lumora PRIVATE src/visual_stub.cpp)
 endif()
 target_link_libraries(lumora PRIVATE Luau.Compiler Luau.VM Luau.Common Luau.Require Luau.CLI.lib)
-target_include_directories(lumora PRIVATE vendor/luau/VM/include vendor/luau/Compiler/include vendor/luau/CLI/include src)
+target_include_directories(lumora PRIVATE vendor/luau/VM/include vendor/luau/VM/src vendor/luau/Compiler/include vendor/luau/CLI/include src)
 
 if(LUMORA_VISUAL_AVAILABLE)
     target_link_libraries(lumora PRIVATE SDL2::SDL2 SDL2_ttf::SDL2_ttf SDL2_image::SDL2_image)

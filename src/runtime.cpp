@@ -213,6 +213,15 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
     registerCLIGlobals(L);
 
     pushArgs(L, argc, argv, 1);
+    // Executor compatibility globals install BEFORE the prelude: the prelude's
+    // own instance_mt.__namecall dispatcher reads getnamecallmethod() at
+    // dispatch time, and the prelude itself performs method calls
+    // (root:GetService("Workspace")) while installing, so the global must
+    // already exist when the prelude chunk runs. The prelude preserves
+    // pre-registered tables (`http = http or {}`, `syn = syn or {}`), so
+    // the ordering is safe both ways.
+    if (roblox)
+        registerExecutorCompatibilityGlobals(L);
     if (roblox && !installPrelude(L))
     {
         std::cerr << lua_tostring(L, -1) << "\n";

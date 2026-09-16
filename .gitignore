@@ -4,3 +4,4 @@ bin/luau-vm
 .vscode/
 .idea/
 bin/*.exe
+todo.md
