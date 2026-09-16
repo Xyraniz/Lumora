@@ -29,6 +29,13 @@ void registerEmbeddedHost(lua_State* L);
 void registerAnalysisGlobals(lua_State* L);
 void registerEmbeddedAnalysisModules(lua_State* L);
 
+// executor_compat.cpp — local compatibility surfaces backed by the Luau VM.
+// APIs requiring a Roblox client fail explicitly instead of fabricating state.
+void registerExecutorCompatibilityGlobals(lua_State* L);
+void registerRuntimeScript(lua_State* L, const char* path, const std::string& source);
+void recordLoadedModule(lua_State* L, const std::string& name, const std::string& source);
+int lumoraFpsCap();
+
 // json.cpp
 void registerJsonGlobals(lua_State* L);
 

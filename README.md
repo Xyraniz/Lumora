@@ -37,13 +37,13 @@ Normal output preserves the script’s stdout. With `--json`, Lumora returns a s
 
 ### Requirements
 
-A C++17 compiler, [CMake](https://cmake.org) and [Ninja](https://ninja-build.org) are required. Luau sources are already included in the repository, so the build does not require installing Luau separately or downloading dependencies during compilation. SDL2, SDL2_ttf and SDL2_image are optional: they are only needed to build the `--visual` lab; the headless runtime does not depend on them.
+A C++17 compiler, [CMake](https://cmake.org), [Ninja](https://ninja-build.org), libcurl, OpenSSL, libsodium, libuv and LZ4 development headers are required. Luau sources are already included in the repository, so the build does not require installing Luau separately or downloading dependencies during compilation. SDL2, SDL2_ttf and SDL2_image are optional: they are only needed to build the `--visual` lab; the headless runtime does not depend on them.
 
 On Debian or Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake ninja-build
+sudo apt-get install -y build-essential cmake ninja-build libcurl4-openssl-dev libssl-dev libsodium-dev libuv1-dev liblz4-dev
 ```
 
 ### Reproducible build
@@ -191,7 +191,7 @@ The following table summarizes the API covered by the current prelude. Compatibi
 | Enums | `Enum.X.Y`, `Name`, `EnumType`, `FromName`, `FromValue` and `Value`. |
 | Data types | `typeof`, `Vector2`, `Vector3`, `UDim`, `UDim2`, `CFrame`, `Color3`, `BrickColor`, `Ray`, `RaycastParams`, `NumberRange`, `NumberSequence`, `ColorSequence`, `Font`, `Rect`, `Path2D` and `TweenInfo`. |
 | Scheduling | Cooperative `task.spawn`, `task.defer`, `task.delay`, `task.cancel`, `task.resume`, `task.status`, `task.deferSelf`, and `task.wait`, plus the usual global aliases. Delays use deterministic virtual time, waits resume only at their deadlines, cancellation closes queued coroutines, and detached task errors are preserved and reported. `RunService:BindToRenderStep` callbacks run in deterministic priority order and can be removed with `UnbindFromRenderStep`. |
-| Environment functions | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv` and an executor compatibility layer (safe stubs). |
+| Environment and local compatibility | `iscclosure`, `islclosure`, `newcclosure`, `clonefunction`, `getfenv`, `setfenv`, `getgenv`, `getrenv`, VM-backed raw metatables/read-only tables, local signal and instance reflection, tracked script source/closure/hash inspection, LZ4 compression, per-thread identity, visual FPS caps, and libcurl HTTP requests. Client-only hooks, teleporting, place serialization and physics contact injection raise explicit errors. |
 | Safe host capabilities | `setclipboard`/`getclipboard` in-memory by default; system clipboard opt-in via `LUMORA_SYSTEM_CLIPBOARD=1`, plus `getcallstack` and `lumora.capabilities()`. They do not access Roblox. |
 | Test filesystem | `writefile`, `readfile`, `appendfile`, `isfile`, `isfolder`, `makefolder`, `delfile`, `delfolder`, `listfiles` and `loadfile` over an ephemeral in-memory filesystem. The native `@lumora/fs` module adds typed metadata, directory reads, recursive copy/move/remove, and file/directory predicates without host filesystem access. |
 | JSON | `HttpService:JSONEncode`, `HttpService:JSONDecode`, `json.encode` and `json.decode`, with deterministic objects and cycle/depth errors. |
@@ -288,7 +288,7 @@ Lumora is an independent project and does not belong to any particular code gene
 
 Lumora runs Luau code with access to the full standard library and, by default, additional globals such as `loadstring` and the executor compatibility layer. **Lumora is not a security sandbox.** It is designed to run scripts that are under reasonable control or trust within a CI pipeline or a local validation flow. To execute untrusted or unknown-origin code, use an external container (Docker, Linux namespaces, VM, etc.) that isolates the filesystem, network and processes.
 
-`setclipboard`/`getclipboard` functions use an in-process string by default. If `LUMORA_SYSTEM_CLIPBOARD=1` is set, they also attempt to use `wl-copy`/`wl-paste`, `xclip` or `xsel`, with a timeout and fallback to memory. `writefile` and related functions operate over an ephemeral in-memory filesystem; none of these APIs read or modify the real filesystem. `getcallstack` and `lumora.capabilities()` only expose local diagnostic metadata. Executor hook functions remain compatibility stubs and do not alter functions or metatables; network calls and teleport fail explicitly because there is no Roblox transport.
+`setclipboard`/`getclipboard` functions use an in-process string by default. If `LUMORA_SYSTEM_CLIPBOARD=1` is set, they also attempt to use `wl-copy`/`wl-paste`, `xclip` or `xsel`, with a timeout and fallback to memory. `writefile` and related functions operate over an ephemeral in-memory filesystem; none of these APIs read or modify the real filesystem. `getcallstack` and `lumora.capabilities()` only expose local diagnostic metadata. The compatibility layer includes real local VM reflection, LZ4 compression, and explicit libcurl-backed `request` transport. It identifies itself as Lumora and never pretends to be a third-party executor. Hooks, Roblox namecall dispatch, teleport, place serialization and client-only physics functions raise capability-specific errors because Lumora has no Roblox client.
 
 ### `--sandbox` mode
 

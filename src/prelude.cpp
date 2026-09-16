@@ -27,7 +27,7 @@ static int lumora_loadstring(lua_State* L)
 
     Luau::CompileOptions options;
     options.optimizationLevel = 1;
-    options.debugLevel = 1;
+    options.debugLevel = 2;
 
     std::string bytecode;
     try

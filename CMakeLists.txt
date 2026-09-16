@@ -35,6 +35,7 @@ add_executable(lumora
     src/require.cpp
     src/json.cpp
     src/host_api.cpp
+    src/executor_compat.cpp
     src/analysis.cpp
     src/analyzer.cpp
     src/native_modules.cpp
@@ -52,7 +53,7 @@ if(LUMORA_VISUAL_AVAILABLE)
 endif()
 
 if(UNIX)
-    target_link_libraries(lumora PRIVATE pthread dl m curl ssl crypto sodium uv)
+    target_link_libraries(lumora PRIVATE pthread dl m curl ssl crypto sodium uv lz4)
 endif()
 
 add_custom_command(TARGET lumora POST_BUILD
@@ -85,9 +86,11 @@ if(BUILD_TESTING)
     add_test(NAME expanded_native_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/expanded_native_contract.lua)
     add_test(NAME introspection_system_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/introspection_system_contract.lua)
     set_tests_properties(introspection_system_contract PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(NAME native_network_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/native_network_contract.sh)
-    add_test(NAME native_http_server_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/native_http_server_contract.sh)
-    add_test(NAME sandbox_require_contract COMMAND $<TARGET_FILE:lumora> --sandbox ${CMAKE_SOURCE_DIR}/tests/sandbox_require_contract.lua)
+    add_test(NAME executor_compat_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/executor_compat_contract.lua)
+        add_test(NAME native_network_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/native_network_contract.sh)
+        add_test(NAME native_http_server_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/native_http_server_contract.sh)
+        add_test(NAME executor_request_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/executor_request_contract.sh)
+        add_test(NAME sandbox_require_contract COMMAND $<TARGET_FILE:lumora> --sandbox ${CMAKE_SOURCE_DIR}/tests/sandbox_require_contract.lua)
     add_test(NAME scheduler_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/scheduler_contract.lua)
     add_test(NAME scheduler_real_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/scheduler_real_contract.lua)
     add_test(NAME attached_library_load COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/examples/attached_library.lua)
@@ -104,5 +107,6 @@ if(BUILD_TESTING)
         add_test(NAME json_schema COMMAND ${CMAKE_SOURCE_DIR}/tests/json_schema.sh $<TARGET_FILE:lumora>)
         add_test(NAME analyzer_cli COMMAND ${CMAKE_SOURCE_DIR}/tests/analyzer_cli.sh $<TARGET_FILE:lumora>)
         add_test(NAME differential_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/differential_contract.sh $<TARGET_FILE:lumora>)
+        add_test(NAME local_limit_contract COMMAND ${CMAKE_SOURCE_DIR}/tests/local_limit_contract.sh $<TARGET_FILE:lumora>)
     endif()
 endif()

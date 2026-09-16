@@ -64,7 +64,9 @@ static int cliLoadstring(lua_State* L)
 
     Luau::CompileOptions options;
     options.optimizationLevel = 1;
-    options.debugLevel = 1;
+    // Retain local debug registers so dynamic chunks expose real compiler
+    // resource diagnostics instead of eliding unused locals first.
+    options.debugLevel = 2;
 
     const std::string bytecode = Luau::compile(std::string(source, len), options);
     if (luau_load(L, chunkname, bytecode.data(), bytecode.size(), 0) == 0)
@@ -135,7 +137,7 @@ void applySandbox(lua_State* L)
         "getgenv", "getrenv", "hookfunction", "hookmetamethod",
         "getrawmetatable", "setrawmetatable", "getnamecallmethod",
         "setnamecallmethod", "checkcaller", "cloneref", "clonereference",
-        "request", "syn", "Drawing", "writefile", "readfile", "isfile",
+        "request", "http_request", "http", "syn", "Drawing", "writefile", "readfile", "isfile",
         "isfolder", "makefolder", "delfile", "delfolder", "listfiles",
         "appendfile", "getconnections", "gethui", "protectgui", "setclipboard",
         "getclipboard", "getcallstack", "lumora", "require",
@@ -220,6 +222,8 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
     {
         registerRobloxGlobals(L);
         registerHostGlobals(L);
+        registerExecutorCompatibilityGlobals(L);
+        registerRuntimeScript(L, path, source);
     }
     registerEmbeddedHost(L);
     registerAnalysisGlobals(L);
@@ -240,7 +244,9 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
     if (timeout > 0.0) lua_callbacks(L)->interrupt = timeoutInterrupt;
     Luau::CompileOptions options;
     options.optimizationLevel = 1;
-    options.debugLevel = 1;
+    // Preserving local debug registers also exposes the real 200-live-local
+    // limit enforced by the vendored official Luau compiler.
+    options.debugLevel = 2;
     const std::string bytecode = Luau::compile(source, options);
     int rc = 0;
 

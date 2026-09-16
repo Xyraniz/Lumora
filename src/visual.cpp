@@ -11,6 +11,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <chrono>
 
 namespace {
 TTF_Font* gFont=nullptr;
@@ -103,7 +104,7 @@ int runVisual(const char* path,int argc,char** argv,bool sandbox) {
     const char* fonts[]={"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf","/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"};for(const char* font:fonts){gFont=TTF_OpenFont(font,14);if(gFont)break;}
     lua_State* L=luaL_newstate();luaL_openlibs(L); if(!loadScript(L,path,argc,argv)){lua_close(L);SDL_DestroyRenderer(renderer);SDL_DestroyWindow(win);SDL_Quit();return 1;}
     Camera cam; bool running=true, capture=true, aim=false; Uint64 last=SDL_GetPerformanceCounter(); SDL_SetRelativeMouseMode(SDL_TRUE);
-    while(running){ Uint64 now=SDL_GetPerformanceCounter(); float dt=(float)((now-last)/(double)SDL_GetPerformanceFrequency());last=now;dt=std::min(dt,.05f); SDL_Event e; const Uint8* keys=SDL_GetKeyboardState(nullptr);
+    while(running){ const auto frameStart=std::chrono::steady_clock::now(); Uint64 now=SDL_GetPerformanceCounter(); float dt=(float)((now-last)/(double)SDL_GetPerformanceFrequency());last=now;dt=std::min(dt,.05f); SDL_Event e; const Uint8* keys=SDL_GetKeyboardState(nullptr);
         while(SDL_PollEvent(&e)){if(e.type==SDL_QUIT)running=false; if(e.type==SDL_KEYDOWN&&e.key.keysym.sym==SDLK_ESCAPE)running=false; if(e.type==SDL_KEYDOWN&&e.key.keysym.sym==SDLK_f)aim=!aim; if(e.type==SDL_KEYDOWN||e.type==SDL_KEYUP)fireSignal(L,"UserInputService",e.type==SDL_KEYDOWN?"InputBegan":"InputEnded",dt); if(e.type==SDL_MOUSEMOTION&&capture){cam.yaw+=e.motion.xrel*.003f;cam.pitch=std::clamp(cam.pitch-e.motion.yrel*.003f,-1.3f,1.3f);}}
         V3 forward{std::sin(cam.yaw),0,std::cos(cam.yaw)}, right{std::cos(cam.yaw),0,-std::sin(cam.yaw)}; V3 move{0,0,0}; if(keys[SDL_SCANCODE_W])move=move+forward;if(keys[SDL_SCANCODE_S])move=move-forward;if(keys[SDL_SCANCODE_D])move=move+right;if(keys[SDL_SCANCODE_A])move=move-right;cam.pos=cam.pos+norm(move)*(10.f*dt);
         int w,h;SDL_GetRendererOutputSize(renderer,&w,&h);SDL_SetRenderDrawColor(renderer,34,42,48,255);SDL_RenderClear(renderer);
@@ -119,6 +120,8 @@ int runVisual(const char* path,int argc,char** argv,bool sandbox) {
         SDL_SetRenderDrawColor(renderer,255,255,255,255);SDL_Rect cross{w/2-8,h/2,16,1};SDL_RenderFillRect(renderer,&cross);SDL_Rect cross2{w/2,h/2-8,1,16};SDL_RenderFillRect(renderer,&cross2);
         SDL_SetRenderDrawColor(renderer,18,24,29,230);SDL_Rect panel{18,18,330,74};SDL_RenderFillRect(renderer,&panel);drawText(renderer,30,30,"LUMORA VISUAL LAB",{110,220,255,255});drawText(renderer,30,45,"WASD move | mouse look | F toggle aim",{230,230,230,255});drawText(renderer,30,60,aim?"AIM ASSIST: TARGETING":"ESP: HIGHLIGHTS ACTIVE",{255,190,80,255});if(bestIndex>=0&&aim)drawText(renderer,30,75,"locked: "+players[bestIndex].name,{255,100,90,255});
         SDL_RenderPresent(renderer);
+        const int fpsCap=lumoraFpsCap();
+        if(fpsCap>0){const auto budget=std::chrono::microseconds(1000000/fpsCap);const auto elapsed=std::chrono::steady_clock::now()-frameStart;if(elapsed<budget)SDL_Delay(Uint32(std::chrono::duration_cast<std::chrono::milliseconds>(budget-elapsed).count()));}
     }
     SDL_SetRelativeMouseMode(SDL_FALSE);lua_close(L);if(gFont){TTF_CloseFont(gFont);gFont=nullptr;}SDL_DestroyRenderer(renderer);SDL_DestroyWindow(win);TTF_Quit();SDL_Quit();return 0;
 }

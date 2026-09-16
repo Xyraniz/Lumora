@@ -93,13 +93,13 @@ int capabilities(lua_State* L)
     lua_newtable(L);
     const int table = lua_gettop(L);
     setStringField(L, table, "runtime", "Lumora");
-    setStringField(L, table, "version", "0.4.0");
+    setStringField(L, table, "version", "0.7.0");
     std::string ignored;
     const bool systemClipboard = readSystemClipboard(ignored);
     setStringField(L, table, "clipboard", "memory");
     setBooleanField(L, table, "systemClipboardAvailable", systemClipboard);
     setStringField(L, table, "filesystem", "memory");
-    setStringField(L, table, "http", "disabled");
+    setStringField(L, table, "http", "libcurl");
     setStringField(L, table, "rendering", "headless");
     setStringField(L, table, "network", "disabled");
     setBooleanField(L, table, "debug", true);
@@ -304,7 +304,7 @@ void registerHostGlobals(lua_State* L)
         lua_newtable(L);
     }
     const int api = lua_gettop(L);
-    setStringField(L, api, "version", "0.4.0");
+    setStringField(L, api, "version", "0.7.0");
     registerFunction(L, api, "setClipboard", setClipboard);
     registerFunction(L, api, "getClipboard", getClipboard);
     registerFunction(L, api, "getCallStack", getCallStack);

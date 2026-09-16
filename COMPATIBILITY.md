@@ -122,13 +122,36 @@ not import upstream runtime code or depend on the upstream runtime repository. T
 | `iscclosure` / `islclosure` | ✅ | |
 | `newcclosure` / `clonefunction` | ✅ | |
 | `getfenv` / `setfenv` | ✅ | |
-| `getgenv` / `getrenv` | 🟡 | Returns a shared table; no real environment isolation. |
+| `identifyexecutor` / `getexecutorname` | ✅ | Returns `Lumora` and its runtime version. The runtime never impersonates a third-party executor. |
+| `getgenv` / `getrenv` | ✅ | Return the active Lumora global environment for the current VM. |
+| `getsenv(script)` | ✅ | Returns the active environment for the runtime-owned root `script`; scripts without a locally tracked environment fail explicitly. |
+| `getrawmetatable` / `setrawmetatable` | ✅ | Uses the Luau VM metatable API and therefore bypasses Lua-level `__metatable` locking where the VM permits it. |
+| `setreadonly` / `isreadonly` / `make_writeable` | ✅ | Use the Luau VM read-only-table flag, including real write failures for frozen tables. |
+| `getscriptbytecode` / `decompile` / `getscriptclosure` | ✅ | Operate on `Script`/`ModuleScript` source stored in Lumora's own instance tree; untracked scripts fail explicitly. |
+| `getupvalues` | ✅ | Reads values through the public Luau debug API. |
+| `getconstants` / `getprotos` | 🔴 | The vendored public Luau VM API does not expose compiled constants or nested prototype reflection; calls fail explicitly. |
+| `getinstances` / `getnilinstances` / `getloadedmodules` / `getrunningscripts` | ✅ | Enumerate Lumora's actual weak instance registry, actual successfully loaded modules, and the root runtime script. |
+| `getconnections` / `firesignal` | ✅ | Read and dispatch Lumora `Signal` connection records, preserving their connected state. |
+| `fireclickdetector` | ✅ | Dispatches a local `ClickDetector` signal only when within its configured activation distance. |
+| `request` / `http_request` / `syn.request` | ✅ | Execute an explicit outbound HTTP request through libcurl and return status, headers and body. Transport failures raise Luau errors; no response is fabricated. |
+| `lz4compress` / `lz4decompress` | ✅ | Real LZ4 block compression/decompression with strict caller-provided output size validation and a 64 MiB decompression ceiling. |
+| `getthreadidentity` / `setthreadidentity` / `getidentity` / `setidentity` | ✅ | Per-Luau-thread local identity values validated in the range 0–8; they do not grant Roblox permissions. |
+| `setfpscap` / `getfpscap` | ✅ | Store a real visual-lab frame cap (0–1000); the cap is applied by the SDL visual loop when it is enabled. |
+| `cloneref` / `compareinstances` | ✅ | Return and compare the same in-process object identity. |
+| `gethiddenproperty` / `sethiddenproperty` | 🟡 | Real support is intentionally limited to Lumora-owned `Script.Source`; unsupported properties are reported rather than invented. |
+| `getscripthash` / `getfunctionhash` | ✅ | SHA-256 hashes of tracked script source or closures obtained via `getscriptclosure`. |
+| `isexecutorclosure` | ✅ | Reports whether a function is a native C closure in this VM. |
+| `hookfunction` / `hookmetamethod` / `getnamecallmethod` / `setnamecallmethod` | 🔴 | Explicitly unavailable: Luau exposes no safe public patching or Roblox `__namecall` dispatch surface. |
+| `firetouchdetector` | 🔴 | Explicitly unavailable: Lumora has no physics contact solver or `TouchTransmitter`. |
+| `messagebox` / `queue_on_teleport` | 🔴 | Explicitly unavailable in the headless runtime; there is no desktop dialog or Roblox teleport lifecycle. |
+| `saveinstance` / `saveplace` / `savegame` | 🔴 | Explicitly unavailable: Lumora does not serialize Roblox places or client state. |
+| `setfflag` / `getfflag` | 🔴 | Explicitly unavailable: engine fast flags are compile-time configuration, not script state. |
 | `setclipboard` / `getclipboard` | ✅ | In-memory clipboard by default; system backend opt-in via `LUMORA_SYSTEM_CLIPBOARD=1`, with a safe fallback. Removed in `--sandbox`. |
 | `getcallstack` | ✅ | Returns serializable frames with source, line, name and type. Removed in `--sandbox`. |
 | `lumora.capabilities()` | ✅ | Describes local capabilities (`memory`, `stub`, `disabled`, `headless`). Removed in `--sandbox`. |
 | `loadstring` / `load` | ✅ | Compiles Luau to bytecode and loads. Also present in `--no-roblox` (parity with the official CLI, which registers `loadstring` and `collectgarbage` as globals). Removed in `--sandbox`. |
 | Frozen libraries | ✅ | Writing to `string`, `table`, `math`, `os`, `coroutine`, `debug`, `utf8`, `bit32`, `buffer`, `vector` or to `getmetatable("")` raises `attempt to modify a readonly table`, matching real Roblox and the official CLI. The globals table remains writable (parity with Roblox). |
-| Executor layer (`hookfunction`, etc.) | 🟡 | Only safe wrappers/inspection; mutating hooks are not available and do not report mutation. Removed in `--sandbox`. |
+| Executor layer | 🟡 | Local reflection, VM-backed read-only state, signals, compression, HTTP and script hashing are implemented. Mutating hooks and Roblox-client operations fail explicitly. Removed in `--sandbox`. |
 
 ## Filesystem and serialization
 
@@ -151,7 +174,7 @@ not import upstream runtime code or depend on the upstream runtime repository. T
 | `Camera:WorldToViewportPoint` / `ViewportPointToRay` | ✅ | Deterministic perspective projection based on `CFrame`, FOV and viewport. |
 | `VirtualInputManager` / `ContextActionService` | ✅ | Observable events and actions in memory; do not inject events into the OS. |
 | `Debris:AddItem` / `StarterGui` | ✅ | Destruction scheduler and CoreGui/Core state functional in memory. |
-| `request` / network `HttpService` | 🔴 | No network transport; calls produce an explicit error. JSON and `UrlEncode` are local. |
+| `request` / `http_request` / `syn.request` | ✅ | Explicit libcurl transport with deterministic request parsing and real network/HTTP errors. `HttpService` remains local for JSON and URL encoding. |
 | `TeleportService` | 🔴 | No Roblox client; calls produce an explicit error. |
 
 ## Native visual laboratory
@@ -186,5 +209,6 @@ not import upstream runtime code or depend on the upstream runtime repository. T
 | `--sandbox` | ✅ | Reduces the surface of dangerous globals. |
 | `--timeout seconds` | ✅ | Cooperative timeout in Luau + process-level barrier. |
 | `--no-roblox` | ✅ | Runs pure Luau without the prelude, with surface parity to the official CLI: `loadstring`/`collectgarbage` registered, chunk names `"@" + normalizePath`, errors with `stacktrace:`, main chunk in a coroutine and library tables frozen. |
+| Compiler resource limits | ✅ | Lumora preserves local debug registers while compiling user chunks, so the vendored official Luau compiler enforces real VM limits. For example, a scope with a 201st live local fails with `Out of local registers ... exceeded limit 200`; this is covered by `tests/local_limit_contract.sh`. |
 | `--help` / `--version` | ✅ | |
 | Exit codes | ✅ | `0` success, `1` script/timeout error, `2` load/invoke error. |

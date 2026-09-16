@@ -50,7 +50,7 @@ static int lumoraCompile(lua_State* L)
     {
         Luau::CompileOptions options;
         options.optimizationLevel = 1;
-        options.debugLevel = 1;
+        options.debugLevel = 2;
         const std::string bytecode = Luau::compile(std::string(source, size), options);
         lua_pushlstring(L, bytecode.data(), bytecode.size());
         return 1;
@@ -76,7 +76,7 @@ static int lumoraLoad(lua_State* L)
         {
             Luau::CompileOptions options;
             options.optimizationLevel = 1;
-            options.debugLevel = 1;
+            options.debugLevel = 2;
             bytecode = Luau::compile(std::string(sourceOrBytecode, size), options);
         }
 
@@ -236,7 +236,7 @@ static int embeddedRequire(lua_State* L)
             const char* source = embeddedModule(name);
             Luau::CompileOptions options;
             options.optimizationLevel = 1;
-            options.debugLevel = 1;
+            options.debugLevel = 2;
             const std::string bytecode = Luau::compile(source, options);
             if (luau_load(L, name, bytecode.data(), bytecode.size(), 0) != 0)
                 lua_error(L);
@@ -421,7 +421,7 @@ static int loadModule(lua_State* L, void* ctx, const char* /*path*/, const char*
 
     Luau::CompileOptions options;
     options.optimizationLevel = 1;
-    options.debugLevel = 1;
+    options.debugLevel = 2;
     const std::string bytecode = Luau::compile(source, options);
     if (luau_load(module, chunkName, bytecode.data(), bytecode.size(), 0) != 0)
     {
@@ -442,6 +442,10 @@ static int loadModule(lua_State* L, void* ctx, const char* /*path*/, const char*
 
     lua_xmove(module, L, 1);
     lua_remove(L, -2); // remove the module thread kept alive by this call
+    // Keep a real ModuleScript-shaped record only after the module compiled,
+    // ran, and returned exactly one value. Failed module attempts are not
+    // reported as loaded state.
+    recordLoadedModule(L, loadName ? loadName : chunkName ? chunkName : "ModuleScript", source);
     return 1;
 }
 

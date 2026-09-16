@@ -33,6 +33,10 @@ local function signal()
 end
 
 local instance_mt = { __metatable = "The metatable is locked" }
+-- Weak keys track every live emulated Instance without retaining destroyed
+-- objects. Native reflection APIs read this table to enumerate real local
+-- state; it is never a fabricated Roblox client list.
+local _allInstances = setmetatable({}, { __mode = "k" })
 
 -- Roblox class inheritance hierarchy. Each entry maps a class to its parent
 -- class so IsA() can walk the chain (e.g. Part -> BasePart -> PVInstance ->
@@ -212,6 +216,14 @@ function Instance.new(className, parent)
         o._fire = o.Event.Fire
         function o:Fire(...) self.Event:Fire(...) end
     end
+    if className == "ClickDetector" then
+        o.MouseClick = signal()
+        o.RightMouseClick = signal()
+        o.HoverEnter = signal()
+        o.HoverLeave = signal()
+        o.MaxActivationDistance = 32
+    end
+    _allInstances[o] = true
     if parent then o.Parent = parent end
     return o
 end
@@ -584,39 +596,14 @@ if not table.freeze then table.freeze=function(t) return t end end
 utf8.nfcnormalize = utf8.nfcnormalize or function(s) return s end
 utf8.nfdnormalize = utf8.nfdnormalize or function(s) return s end
 
--- ========== Executor globals ==========
--- getgenv: returns a shared table that persists across scripts (Roblox executor)
-local _genv = _G
-getgenv = function() return _genv end
-getrenv = function() return _ENV end
+-- ========== Local compatibility globals ==========
+-- Native registrations install the reflection, HTTP, compression and identity
+-- functions after the prelude. Their behavior is grounded in the local Luau
+-- VM and emulated instance tree. Functions that need a Roblox client fail
+-- explicitly instead of claiming success.
 
--- setclipboard: no-op in headless mode
-setclipboard = function(text) end
-
--- checkcaller: returns false (we are not the executor's internal caller)
+-- checkcaller: Lumora has no executor/client caller boundary.
 checkcaller = function() return false end
-
--- cloneref / clonereference: return the same object (no ref cloning in Lumora)
-cloneref = function(obj) return obj end
-clonereference = function(obj) return obj end
-
--- hookmetamethod: return the original metamethod without hooking
-hookmetamethod = function(mt, method, newFn)
-    local old = getmetatable(mt)
-    if old and old[method] then return old[method] end
-    return function() end
-end
-
--- hookfunction: return the original function without hooking
-hookfunction = function(original, replacement) return original end
-
--- getnamecallmethod / setnamecallmethod
-getnamecallmethod = function() return "" end
-setnamecallmethod = function() end
-
--- getrawmetatable / setrawmetatable
-getrawmetatable = function(obj) return getmetatable(obj) end
-setrawmetatable = function(obj, mt) return setmetatable(obj, mt) end
 
 -- gethui: return a folder-like instance for GUI parenting
 gethui = function() return game:GetService("CoreGui") end
@@ -629,15 +616,9 @@ syn.request = syn.request or function()
     error("syn.request is unavailable: Lumora has no network transport")
 end
 
--- request / http.request: fail loudly rather than returning a false 200.
-local function _stubRequest(opts)
-    error("HTTP requests are unavailable: Lumora has no network transport")
-end
-request = _stubRequest
+-- `request` is installed by executor_compat.cpp and uses libcurl against the
+-- supplied URL. http aliases are populated after prelude installation.
 http = http or {}
-http.request = _stubRequest
-http.get = _stubRequest
-http.post = _stubRequest
 if not HttpService then
     HttpService = game:GetService("HttpService")
 end
@@ -780,6 +761,10 @@ local function _fsRemove(path)
     error("path does not exist: " .. normalized)
 end
 lumora = lumora or {}
+lumora._allInstances = _allInstances
+lumora._runningScripts = lumora._runningScripts or {}
+lumora._loadedModules = lumora._loadedModules or {}
+lumora._functionSources = lumora._functionSources or setmetatable({}, { __mode = "k" })
 lumora.fs = {
     readFile = readfile, writeFile = writefile, appendFile = appendfile,
     readDir = _fsReadDir, writeDir = makefolder, makeDir = makefolder,
@@ -826,9 +811,6 @@ getcustomasset = function(path)
     return "rbxasset://lumora/" .. path
 end
 getsynasset = getcustomasset
-
--- getconnections: return empty list
-getconnections = function(signal) return {} end
 
 -- isluau: true in Lumora
 isluau = function() return true end

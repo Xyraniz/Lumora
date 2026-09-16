@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.7.0] — VM-backed local compatibility
+
+### Added
+- VM-backed local compatibility APIs for global environments, raw metatables,
+  read-only tables, signals, instance enumeration, local click detectors,
+  per-thread identity, visual frame caps, tracked script source/bytecode,
+  closures, upvalues, SHA-256 hashes, and LZ4 compression.
+- Real outbound `request`, `http_request`, and `syn.request` support through
+  libcurl. Responses expose status, reason, headers, body, and success state;
+  transport failures are Luau errors rather than fabricated HTTP responses.
+- Runtime-owned `Script` and `ModuleScript` records for the root script and
+  successfully loaded modules, allowing introspection to operate on actual
+  local runtime state.
+- `tests/executor_compat_contract.lua`, covering the implemented surface,
+  meaningful validation failures, LZ4 round-tripping, native closure identity,
+  signal dispatch, and explicit unsupported behavior.
+- `tests/executor_request_contract.sh`, which runs a localhost HTTP fixture to
+  prove that `request` sends method, body and headers and returns a genuine
+  status, reason, response body and response headers.
+- `tests/local_limit_contract.sh`, confirming that the vendored official Luau
+  compiler emits the real 200-live-local register limit diagnostic.
+
+### Changed
+- The compatibility layer now identifies itself as `Lumora 0.7.0` rather than
+  impersonating a third-party executor.
+- Hooks, namecall dispatch, client-only physics/teleport operations, place
+  serialization, VM constants/prototype inspection, desktop message boxes, and
+  engine fast flags now fail with capability-specific errors. None return a
+  no-op, placeholder value, or false success.
+- The visual laboratory honors `setfpscap` when it is built with SDL support.
+
 ## [0.6.0] — Independent runtime APIs
 
 ### Added
