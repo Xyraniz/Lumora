@@ -3,15 +3,18 @@ local system = require("@lumora/system")
 assert(type(process.pid()) == "number" and process.pid() > 0)
 assert(type(process.execPath()) == "string" and #process.execPath() > 0)
 -- The shell differs per platform: POSIX hosts have /bin/sh, Windows has
--- cmd.exe. Both branches emit "out" on stdout and "err" on stderr with no
--- trailing newline so the captured streams compare exactly.
+-- cmd.exe. Both branches emit "out" on stdout and "err" on stderr; cmd's echo
+-- appends CRLF, so the comparison trims trailing whitespace on both branches.
 local result
 if system.os == "windows" then
-    result = process.run("cmd.exe", {"/c", "<nul set /p=out & <nul set /p=err 1>&2"})
+    result = process.run("cmd.exe", {"/c", "echo out& echo err 1>&2"})
 else
     result = process.run("sh", {"-c", "printf out; printf err >&2"})
 end
-assert(result.ok and result.code == 0 and result.stdout == "out" and result.stderr == "err")
+local function trim(s) return (s:gsub("%s+$", "")) end
+assert(result.ok and result.code == 0)
+assert(trim(result.stdout) == "out", "stdout must capture the child's stdout")
+assert(trim(result.stderr) == "err", "stderr must capture the child's stderr")
 
 local crypto = require("@lumora/crypto")
 local key = crypto.secretbox.keygen()
