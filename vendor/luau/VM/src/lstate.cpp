@@ -107,6 +107,7 @@ static void preinit_state(lua_State* L, global_State* g)
     L->status = 0;
     L->base_ci = L->ci = NULL;
     L->namecall = NULL;
+    L->namecallpending = NULL;
     L->cachedslot = 0;
     L->singlestep = false;
     L->isactive = false;
