@@ -120,6 +120,15 @@ local _classHierarchy = {
     CoreGui = "Instance",
 }
 
+-- Classes that behave as BaseParts and therefore expose the physics contact
+-- signals (Touched/TouchEnded). firetouchdetector drives these from a real AABB
+-- contact test over the emulated DataModel.
+local _basePartClasses = {
+    Part = true, MeshPart = true, TrussPart = true, WedgePart = true,
+    CornerWedgePart = true, UnionOperation = true, NegateOperation = true,
+    BasePart = true, SpawnLocation = true,
+}
+
 local function removeChild(parent, child)
     for i, value in ipairs(parent._children) do
         if value == child then table.remove(parent._children, i); return end
@@ -240,6 +249,13 @@ function Instance.new(className, parent)
         o.HoverEnter = signal()
         o.HoverLeave = signal()
         o.MaxActivationDistance = 32
+    end
+    -- BaseParts expose the physics contact signals. Lumora has no rigid-body
+    -- solver, but firetouchdetector drives these signals from a real AABB
+    -- contact test, so scripts that connect Touched observe genuine events.
+    if _basePartClasses[className] then
+        o.Touched = signal()
+        o.TouchEnded = signal()
     end
     _allInstances[o] = true
     if parent then o.Parent = parent end

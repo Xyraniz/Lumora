@@ -36,6 +36,7 @@ add_executable(lumora
     src/json.cpp
     src/host_api.cpp
     src/executor_compat.cpp
+    src/executor_extras.cpp
     src/analysis.cpp
     src/analyzer.cpp
     src/native_modules.cpp

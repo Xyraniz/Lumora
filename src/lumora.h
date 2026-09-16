@@ -32,6 +32,12 @@ void registerEmbeddedAnalysisModules(lua_State* L);
 // executor_compat.cpp — local compatibility surfaces backed by the Luau VM.
 // APIs requiring a Roblox client fail explicitly instead of fabricating state.
 void registerExecutorCompatibilityGlobals(lua_State* L);
+// executor_extras.cpp — real implementations of the executor surfaces that
+// need engine state: fast flags, place serialization, touch contacts,
+// message boxes and the teleport queue. Registered after the compatibility
+// layer so these override the explicit-failure placeholders.
+void registerExecutorExtras(lua_State* L);
+void lumoraDrainTeleportQueue(lua_State* L);
 void registerRuntimeScript(lua_State* L, const char* path, const std::string& source);
 void recordLoadedModule(lua_State* L, const std::string& name, const std::string& source);
 int lumoraFpsCap();

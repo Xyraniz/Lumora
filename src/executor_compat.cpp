@@ -741,11 +741,6 @@ int fireClickDetector(lua_State* L)
     return 1;
 }
 
-int fireTouchUnavailable(lua_State* L)
-{
-    return unsupported(L, "firetouchdetector", "Lumora has no physics contact solver or TouchTransmitter implementation");
-}
-
 int getInstances(lua_State* L)
 {
     lua_getglobal(L, "lumora");
@@ -828,16 +823,6 @@ int getLoadedModules(lua_State* L)
 int getCustomAssetUnavailable(lua_State* L)
 {
     return unsupported(L, "getcustomasset", "internal registration error");
-}
-
-int messageBoxUnavailable(lua_State* L)
-{
-    return unsupported(L, "messagebox", "the headless runtime has no native desktop dialog backend");
-}
-
-int queueOnTeleportUnavailable(lua_State* L)
-{
-    return unsupported(L, "queue_on_teleport", "Lumora has no Roblox client or teleport lifecycle");
 }
 
 struct HttpResponse
@@ -1019,6 +1004,42 @@ int httpRequest(lua_State* L)
     return 1;
 }
 
+// http.get / http.post are dedicated convenience aliases over the same
+// libcurl-backed request path. They accept either a bare URL string or a full
+// options table (Url/Headers/Body/Timeout/FollowRedirects) and force the HTTP
+// verb, so callers can use the terse executor idiom without losing any of the
+// real request semantics.
+int httpVerb(lua_State* L, const char* verb)
+{
+    if (lua_istable(L, 1))
+    {
+        lua_pushvalue(L, 1);
+    }
+    else
+    {
+        const char* url = luaL_checkstring(L, 1);
+        lua_newtable(L);
+        lua_pushstring(L, url);
+        lua_setfield(L, -2, "Url");
+    }
+    const int options = lua_gettop(L);
+    lua_pushstring(L, verb);
+    lua_setfield(L, options, "Method");
+    lua_pushvalue(L, options);
+    lua_remove(L, options);
+    return httpRequest(L);
+}
+
+int httpGet(lua_State* L)
+{
+    return httpVerb(L, "GET");
+}
+
+int httpPost(lua_State* L)
+{
+    return httpVerb(L, "POST");
+}
+
 int lz4Compress(lua_State* L)
 {
     const std::string input = requiredString(L, 1);
@@ -1094,11 +1115,6 @@ int getFpsCap(lua_State* L)
 {
     lua_pushinteger(L, g_fpsCap.load());
     return 1;
-}
-
-int fflagUnavailable(lua_State* L)
-{
-    return unsupported(L, lua_tostring(L, lua_upvalueindex(1)), "engine fast flags are compile-time configuration and cannot be read or changed safely at runtime");
 }
 
 int cloneReference(lua_State* L)
@@ -1238,10 +1254,7 @@ void registerExecutorCompatibilityGlobals(lua_State* L)
     registerFunction(L, LUA_GLOBALSINDEX, "getconnections", getConnections);
     registerFunction(L, LUA_GLOBALSINDEX, "firesignal", fireSignal);
     registerFunction(L, LUA_GLOBALSINDEX, "fireclickdetector", fireClickDetector);
-    registerFunction(L, LUA_GLOBALSINDEX, "firetouchdetector", fireTouchUnavailable);
 
-    registerFunction(L, LUA_GLOBALSINDEX, "messagebox", messageBoxUnavailable);
-    registerFunction(L, LUA_GLOBALSINDEX, "queue_on_teleport", queueOnTeleportUnavailable);
     registerFunction(L, LUA_GLOBALSINDEX, "request", httpRequest);
     registerFunction(L, LUA_GLOBALSINDEX, "http_request", httpRequest);
     lua_getglobal(L, "http");
@@ -1252,6 +1265,8 @@ void registerExecutorCompatibilityGlobals(lua_State* L)
     }
     const int http = lua_gettop(L);
     registerFunction(L, http, "request", httpRequest);
+    registerFunction(L, http, "get", httpGet);
+    registerFunction(L, http, "post", httpPost);
     lua_setglobal(L, "http");
     lua_getglobal(L, "syn");
     if (!lua_istable(L, -1))
@@ -1265,28 +1280,12 @@ void registerExecutorCompatibilityGlobals(lua_State* L)
     registerFunction(L, LUA_GLOBALSINDEX, "lz4compress", lz4Compress);
     registerFunction(L, LUA_GLOBALSINDEX, "lz4decompress", lz4Decompress);
 
-    lua_pushstring(L, "saveinstance");
-    lua_pushcclosure(L, [](lua_State* state) { return unsupported(state, "saveinstance", "Roblox place serialization is not implemented by this local runtime"); }, "saveinstance", 0);
-    lua_setglobal(L, "saveinstance");
-    lua_pushstring(L, "saveplace");
-    lua_pushcclosure(L, [](lua_State* state) { return unsupported(state, "saveplace", "Roblox place serialization is not implemented by this local runtime"); }, "saveplace", 0);
-    lua_setglobal(L, "saveplace");
-    lua_pushstring(L, "savegame");
-    lua_pushcclosure(L, [](lua_State* state) { return unsupported(state, "savegame", "Roblox place serialization is not implemented by this local runtime"); }, "savegame", 0);
-    lua_setglobal(L, "savegame");
-
     registerFunction(L, LUA_GLOBALSINDEX, "getthreadidentity", getThreadIdentity);
     registerFunction(L, LUA_GLOBALSINDEX, "setthreadidentity", setThreadIdentity);
     registerFunction(L, LUA_GLOBALSINDEX, "getidentity", getThreadIdentity);
     registerFunction(L, LUA_GLOBALSINDEX, "setidentity", setThreadIdentity);
     registerFunction(L, LUA_GLOBALSINDEX, "setfpscap", setFpsCap);
     registerFunction(L, LUA_GLOBALSINDEX, "getfpscap", getFpsCap);
-    lua_pushstring(L, "setfflag");
-    lua_pushcclosure(L, fflagUnavailable, "setfflag", 1);
-    lua_setglobal(L, "setfflag");
-    lua_pushstring(L, "getfflag");
-    lua_pushcclosure(L, fflagUnavailable, "getfflag", 1);
-    lua_setglobal(L, "getfflag");
     registerFunction(L, LUA_GLOBALSINDEX, "cloneref", cloneReference);
     registerFunction(L, LUA_GLOBALSINDEX, "clonereference", cloneReference);
     registerFunction(L, LUA_GLOBALSINDEX, "compareinstances", compareInstances);

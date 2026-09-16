@@ -1,7 +1,16 @@
 local process = require("@lumora/process")
+local system = require("@lumora/system")
 assert(type(process.pid()) == "number" and process.pid() > 0)
 assert(type(process.execPath()) == "string" and #process.execPath() > 0)
-local result = process.run("sh", {"-c", "printf out; printf err >&2"})
+-- The shell differs per platform: POSIX hosts have /bin/sh, Windows has
+-- cmd.exe. Both branches emit "out" on stdout and "err" on stderr with no
+-- trailing newline so the captured streams compare exactly.
+local result
+if system.os == "windows" then
+    result = process.run("cmd.exe", {"/c", "<nul set /p=out & <nul set /p=err 1>&2"})
+else
+    result = process.run("sh", {"-c", "printf out; printf err >&2"})
+end
 assert(result.ok and result.code == 0 and result.stdout == "out" and result.stderr == "err")
 
 local crypto = require("@lumora/crypto")

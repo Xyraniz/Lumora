@@ -232,6 +232,10 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
         registerRobloxGlobals(L);
         registerHostGlobals(L);
         registerExecutorCompatibilityGlobals(L);
+        // Real engine-backed executor surfaces (fast flags, place serializer,
+        // touch contacts, message boxes, teleport queue) install last so they
+        // replace the explicit-failure placeholders registered above.
+        registerExecutorExtras(L);
         registerRuntimeScript(L, path, source);
     }
     registerEmbeddedHost(L);

@@ -499,7 +499,18 @@ end
 do
     local ts = game:GetService("TeleportService")
     ts.TeleportInitFailed = signal()
-    local function unavailable() error("TeleportService is unavailable: Lumora has no Roblox client") end
+    -- Lumora has no Roblox client, so the teleport itself cannot complete, but
+    -- the documented queue_on_teleport contract still holds: every queued
+    -- source runs in order when a teleport is attempted. We drain the queue
+    -- first, then report the missing client so scripts observe both effects.
+    local function drainQueue()
+        local drain = __lumora_drain_teleport_queue
+        if type(drain) == "function" then drain() end
+    end
+    local function unavailable()
+        drainQueue()
+        error("TeleportService is unavailable: Lumora has no Roblox client")
+    end
     function ts:Teleport(placeId, player, options, bindable) unavailable() end
     function ts:TeleportToPlaceInstance(placeId, jobId, player, ...) unavailable() end
     function ts:TeleportPartyAsync(placeId, players, options) unavailable() end

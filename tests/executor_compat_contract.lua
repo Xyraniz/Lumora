@@ -219,11 +219,61 @@ assert(alphaCount >= 1)
 assert(#getprotos(function() end) == 0)
 assert(#getprotos(print) == 0)
 
--- still-unimplemented surfaces must raise explicit errors (no silent stubs)
-for _, unavailable in ipairs({ firetouchdetector, messagebox, queue_on_teleport,
-    saveinstance, saveplace, savegame, setfflag, getfflag }) do
-    assert(not pcall(unavailable), "unsupported capability must fail explicitly")
-end
+-- fast flags: setfflag writes a typed value, getfflag reads it back
+assert(setfflag("FFlagLumoraContractProbe", "true") == true)
+assert(getfflag("FFlagLumoraContractProbe") == "true")
+assert(setfflag("FFlagLumoraContractProbe", false) == true)
+assert(getfflag("FFlagLumoraContractProbe") == "false")
+assert(setfflag("FStringLumoraContractProbe", "hello") == true)
+assert(getfflag("FStringLumoraContractProbe") == "hello")
+assert(setfflag("FIntLumoraContractProbe", 42) == true)
+assert(getfflag("FIntLumoraContractProbe") == "42")
+-- a boolean flag rejects a non-boolean value instead of silently coercing
+assert(setfflag("FFlagLumoraContractProbe", "not-a-bool") == false)
+-- unknown flags read as an empty string so feature detection can branch
+assert(getfflag("FFlagLumoraNeverRegistered") == "")
+
+-- messagebox returns a button id (IDOK = 1 on a headless host)
+local button = messagebox("Lumora", "contract probe", 0)
+assert(type(button) == "number" and button >= 1)
+
+-- queue_on_teleport accepts a source string; the queue drains on teleport
+assert(pcall(queue_on_teleport, "local _ = 1 + 1"))
+
+-- firetouchdetector drives Touched for overlapping BaseParts and returns the
+-- number of contacts it fired
+local probeA = Instance.new("Part")
+probeA.Position = Vector3.new(0, 0, 0)
+probeA.Size = Vector3.new(4, 4, 4)
+local probeB = Instance.new("Part")
+probeB.Position = Vector3.new(1, 0, 0)
+probeB.Size = Vector3.new(4, 4, 4)
+local touched = 0
+probeA.Touched:Connect(function() touched += 1 end)
+local contacts = firetouchdetector(probeA)
+assert(type(contacts) == "number" and contacts >= 1, "overlapping parts must report a contact")
+assert(touched >= 1, "Touched must fire for the overlapping part")
+probeA:Destroy()
+probeB:Destroy()
+
+-- saveinstance serializes the DataModel to a real rbxlx file readable back
+local savedPath = saveinstance(game, "lumora_contract.rbxlx")
+assert(type(savedPath) == "string" and savedPath == "lumora_contract.rbxlx")
+assert(isfile(savedPath), "saveinstance must write the requested file")
+local xml = readfile(savedPath)
+assert(string.find(xml, '<roblox', 1, true) == 1, "rbxlx must open with the roblox root element")
+assert(string.find(xml, 'version="4"', 1, true) ~= nil, "rbxlx must declare format version 4")
+assert(string.find(xml, "</roblox>", 1, true) ~= nil, "rbxlx must close the root element")
+delfile(savedPath)
+
+-- saveplace is the Elysian alias for saveinstance(game, name)
+local placePath = saveplace("lumora_contract_place.rbxlx")
+assert(isfile(placePath), "saveplace must write the requested file")
+delfile(placePath)
+
+-- http.get / http.post are dedicated aliases over the real request path
+assert(type(http.get) == "function" and type(http.post) == "function")
+assert(not pcall(function() http.get("http://127.0.0.1:1") end))
 
 assert(not pcall(function() request({ Url = "http://127.0.0.1:1", Timeout = 0.01 }) end))
 print("executor-compat-contract-ok")
