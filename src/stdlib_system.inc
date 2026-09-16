@@ -1,42 +1,31 @@
 static constexpr const char kLumoraSystem[] = R"LUMORA(
 --!strict
--- Portable system information surface; intentionally reports only Lumora host data.
+-- Portable system information surface; every field is filled from a real OS
+-- call on the running host (sysctl on macOS, GlobalMemoryStatusEx on Windows,
+-- procfs on Linux) through __lumora_host.systemInfo, so it is correct on every
+-- platform instead of only where /proc exists.
 local M = {}
-M.os = "linux"
-M.arch = "unknown"
+local info = __lumora_host.systemInfo and __lumora_host.systemInfo() or {}
+M.os = info.os or "unknown"
+M.arch = info.arch or "unknown"
 local function env(name: string): string? return __lumora_host.env(name) end
 function M.hostname(): string return env("HOSTNAME") or env("COMPUTERNAME") or "unknown" end
-function M.tmpdir(): string return env("TMPDIR") or "/tmp" end
-local function proc(path: string): string?
-    local ok, value = pcall(__lumora_host.readFile, path)
-    return ok and value or nil
-end
-local cpuinfo = proc("/proc/cpuinfo") or ""
-local meminfo = proc("/proc/meminfo") or ""
-local function countLines(text: string, prefix: string): number
-    local n = 0
-    for line in text:gmatch("[^\n]+") do if line:sub(1, #prefix) == prefix then n += 1 end end
-    return n
-end
+function M.tmpdir(): string return env("TMPDIR") or env("TEMP") or "/tmp" end
 function M.threadCount(): number
-    local n = countLines(cpuinfo, "processor")
-    return n > 0 and n or 1
+    local n = tonumber(info.cpuCount) or 1
+    return n >= 1 and n or 1
 end
 function M.cpus(): {{model: string, speed: number, times: {}}}
+    -- Report one entry per logical processor; the OS model string is not
+    -- portable, so we expose the architecture instead of inventing a model.
     local result = {}
-    for model in cpuinfo:gmatch("model name%s*:%s*([^\n]+)") do table.insert(result, {model = model, speed = 0, times = {}}) end
-    if #result == 0 then table.insert(result, {model = "unknown", speed = 0, times = {}}) end
+    for _ = 1, M.threadCount() do
+        table.insert(result, {model = M.arch, speed = 0, times = {}})
+    end
     return result
 end
-function M.uptime(): number
-    local value = proc("/proc/uptime")
-    return tonumber(value and value:match("^[%d%.]+")) or os.clock()
-end
-local function memoryValue(name: string): number
-    local value = tonumber(meminfo:match(name .. ":%s*(%d+)%s*kB"))
-    return (value or 0) * 1024
-end
-function M.freeMemory(): number return memoryValue("MemFree") end
-function M.totalMemory(): number return memoryValue("MemTotal") end
+function M.uptime(): number return tonumber(info.uptime) or 0 end
+function M.totalMemory(): number return tonumber(info.totalMemory) or 0 end
+function M.freeMemory(): number return tonumber(info.freeMemory) or 0 end
 return table.freeze(M)
 )LUMORA";

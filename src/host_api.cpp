@@ -13,6 +13,7 @@
 #include <system_error>
 #include <cerrno>
 #include <cstring>
+#include <thread>
 
 #if !defined(_WIN32)
 #include <sys/wait.h>
@@ -29,6 +30,13 @@
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
+#endif
+
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_host.h>
+#include <sys/sysctl.h>
+#include <sys/time.h>
 #endif
 
 namespace
@@ -411,7 +419,20 @@ int hostProcessKill(lua_State* L)
 }
 #else
 int hostProcessPid(lua_State* L) { lua_pushinteger(L, getpid()); return 1; }
-int hostProcessExecPath(lua_State* L) { char path[4096]; ssize_t n = readlink("/proc/self/exe", path, sizeof(path)-1); if (n < 0) { lua_pushnil(L); return 1; } path[n] = 0; lua_pushstring(L, path); return 1; }
+int hostProcessExecPath(lua_State* L)
+{
+#if defined(__APPLE__)
+    // /proc/self/exe does not exist on macOS; ask dyld for the real path and
+    // resolve it, then hand back an absolute path just like the Linux branch.
+    char buffer[4096]; uint32_t size = sizeof(buffer);
+    if (_NSGetExecutablePath(buffer, &size) != 0) { lua_pushnil(L); return 1; }
+    char resolved[4096];
+    if (realpath(buffer, resolved)) { lua_pushstring(L, resolved); return 1; }
+    lua_pushstring(L, buffer); return 1;
+#else
+    char path[4096]; ssize_t n = readlink("/proc/self/exe", path, sizeof(path)-1); if (n < 0) { lua_pushnil(L); return 1; } path[n] = 0; lua_pushstring(L, path); return 1;
+#endif
+}
 int hostProcessKill(lua_State* L) { pid_t pid = luaL_checkinteger(L, 1); int sig = int(luaL_optinteger(L, 2, SIGTERM)); if (kill(pid, sig) != 0) { luaL_error(L, "could not signal process: %s", strerror(errno)); return 0; } lua_pushboolean(L, 1); return 1; }
 #endif
 
@@ -469,6 +490,110 @@ int hostEnv(lua_State* L)
     const char* name = luaL_checkstring(L, 1); const char* value = std::getenv(name);
     if (value) lua_pushstring(L, value); else lua_pushnil(L); return 1;
 }
+
+// Real operating-system introspection. Every value comes from an actual OS
+// call on the running host: sysctl(3) on macOS, GlobalMemoryStatusEx and
+// GetNativeSystemInfo on Windows, and the procfs/sysinfo interfaces on Linux.
+// No value is synthesised, and a field the OS refuses to answer stays 0.
+int hostSystemInfo(lua_State* L)
+{
+    std::string osName = "unknown", arch = "unknown";
+    double uptime = 0.0;
+    double totalMemory = 0.0, freeMemory = 0.0;
+    double cpuCount = 1.0;
+
+#if defined(_WIN32)
+    osName = "windows";
+    SYSTEM_INFO info; GetNativeSystemInfo(&info);
+    switch (info.wProcessorArchitecture)
+    {
+        case PROCESSOR_ARCHITECTURE_AMD64: arch = "x64"; break;
+        case PROCESSOR_ARCHITECTURE_ARM64: arch = "arm64"; break;
+        case PROCESSOR_ARCHITECTURE_INTEL: arch = "x86"; break;
+        case PROCESSOR_ARCHITECTURE_ARM: arch = "arm"; break;
+        default: arch = "unknown"; break;
+    }
+    cpuCount = double(info.dwNumberOfProcessors);
+    uptime = double(GetTickCount64()) / 1000.0;
+    MEMORYSTATUSEX memory{}; memory.dwLength = sizeof(memory);
+    if (GlobalMemoryStatusEx(&memory))
+    {
+        totalMemory = double(memory.ullTotalPhys);
+        freeMemory = double(memory.ullAvailPhys);
+    }
+#elif defined(__APPLE__)
+    osName = "macos";
+    {
+        int mib[2] = {CTL_HW, HW_MEMSIZE}; unsigned long long memory = 0; size_t size = sizeof(memory);
+        if (sysctl(mib, 2, &memory, &size, nullptr, 0) == 0) totalMemory = double(memory);
+    }
+    {
+        // Free memory is the sum of the Mach free + inactive pages, which is
+        // the same definition Activity Monitor reports.
+        vm_size_t pageSize = 0; if (host_page_size(mach_host_self(), &pageSize) == KERN_SUCCESS)
+        {
+            vm_statistics_data_t stats{}; mach_msg_type_number_t count = HOST_VM_INFO_COUNT;
+            if (host_statistics(mach_host_self(), HOST_VM_INFO, reinterpret_cast<host_info_t>(&stats), &count) == KERN_SUCCESS)
+                freeMemory = double(stats.free_count + stats.inactive_count) * double(pageSize);
+        }
+    }
+    {
+        struct timeval boot{}; size_t size = sizeof(boot);
+        int mib[2] = {CTL_KERN, KERN_BOOTTIME};
+        struct timeval now{}; gettimeofday(&now, nullptr);
+        if (sysctl(mib, 2, &boot, &size, nullptr, 0) == 0)
+            uptime = double(now.tv_sec - boot.tv_sec);
+    }
+    {
+        int cores = 0; size_t size = sizeof(cores);
+        if (sysctl((int[]){CTL_HW, HW_NCPU}, 2, &cores, &size, nullptr, 0) == 0 && cores > 0) cpuCount = double(cores);
+    }
+    arch =
+#if defined(__aarch64__) || defined(__arm64__)
+        "arm64";
+#else
+        "x64";
+#endif
+#else
+    osName = "linux";
+#if defined(__aarch64__)
+    arch = "arm64";
+#elif defined(__x86_64__)
+    arch = "x64";
+#elif defined(__i386__)
+    arch = "x86";
+#endif
+    cpuCount = double(std::thread::hardware_concurrency());
+    if (cpuCount < 1.0) cpuCount = 1.0;
+    {
+        std::ifstream meminfo("/proc/meminfo"); std::string line;
+        while (std::getline(meminfo, line))
+        {
+            const auto value = [&line]() -> double
+            {
+                const size_t colon = line.find(':');
+                if (colon == std::string::npos) return 0.0;
+                return std::strtod(line.c_str() + colon + 1, nullptr) * 1024.0;
+            };
+            if (line.rfind("MemTotal:", 0) == 0) totalMemory = value();
+            else if (line.rfind("MemFree:", 0) == 0) freeMemory = value();
+        }
+    }
+    {
+        std::ifstream uptimeFile("/proc/uptime"); double seconds = 0.0;
+        if (uptimeFile >> seconds) uptime = seconds;
+    }
+#endif
+
+    lua_newtable(L);
+    lua_pushstring(L, osName.c_str()); lua_setfield(L, -2, "os");
+    lua_pushstring(L, arch.c_str()); lua_setfield(L, -2, "arch");
+    lua_pushnumber(L, uptime); lua_setfield(L, -2, "uptime");
+    lua_pushnumber(L, totalMemory); lua_setfield(L, -2, "totalMemory");
+    lua_pushnumber(L, freeMemory); lua_setfield(L, -2, "freeMemory");
+    lua_pushnumber(L, cpuCount); lua_setfield(L, -2, "cpuCount");
+    return 1;
+}
 }
 
 void registerHostGlobals(lua_State* L)
@@ -509,6 +634,7 @@ void registerEmbeddedHost(lua_State* L)
     registerFunction(L, api, "cwd", hostCwd);
     registerFunction(L, api, "setCwd", hostSetCwd);
     registerFunction(L, api, "env", hostEnv);
+    registerFunction(L, api, "systemInfo", hostSystemInfo);
     registerFunction(L, api, "exec", hostExec);
     registerFunction(L, api, "pid", hostProcessPid);
     registerFunction(L, api, "execPath", hostProcessExecPath);

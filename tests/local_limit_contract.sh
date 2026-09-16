@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 VM="$1"
-TMP=$(mktemp --suffix=.luau)
+TMP=$(mktemp "${TMPDIR:-/tmp}/lumora-XXXXXX.luau")
 trap 'rm -f "$TMP"' EXIT
 for i in $(seq 1 201); do
     printf 'local v%s\n' "$i" >> "$TMP"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 VM="$1"
-TMP=$(mktemp --suffix=.lua)
+TMP=$(mktemp "${TMPDIR:-/tmp}/lumora-XXXXXX.lua")
 trap 'rm -f "$TMP"' EXIT
 printf 'print("flags", arg[1])\n' > "$TMP"
 JSON=$("$VM" --json --no-roblox "$TMP" value)

@@ -1,3 +1,15 @@
+// On Windows curl/curl.h transitively includes windows.h, which defines the
+// min/max macros that break std::numeric_limits<T>::max() and any std::min/max
+// use below. NOMINMAX must be defined before that header is first pulled in.
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
 #include "lua.h"
 #include "lualib.h"
 #include "Luau/Compiler.h"

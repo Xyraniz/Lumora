@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 VM="$1"
-TMP=$(mktemp --suffix=.lua)
+TMP=$(mktemp "${TMPDIR:-/tmp}/lumora-XXXXXX.lua")
 trap 'rm -f "$TMP"' EXIT
 
 # Validate that every JSON path produces a SINGLE flat JSON object (no nested

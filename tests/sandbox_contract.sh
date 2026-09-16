@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 VM="$1"
-TMP=$(mktemp --suffix=.lua)
+TMP=$(mktemp "${TMPDIR:-/tmp}/lumora-XXXXXX.lua")
 trap 'rm -f "$TMP"' EXIT
 
 # In sandbox mode, dangerous globals must be nil.
