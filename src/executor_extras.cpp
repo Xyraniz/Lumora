@@ -16,6 +16,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <io.h>
 #else
 #include <unistd.h>
 #endif
@@ -657,6 +658,17 @@ int messageBox(lua_State* L)
     const int options = int(luaL_optinteger(L, 3, 0));
 
 #if defined(_WIN32)
+    // A real MessageBoxA blocks until the user dismisses it. On a headless or
+    // non-interactive session (CI runners, service accounts) there is no window
+    // station to show it on, so we detect that case and return IDOK instead of
+    // hanging forever. GetProcessWindowStation() returns NULL when the process
+    // has no interactive window station.
+    HWINSTA station = GetProcessWindowStation();
+    if (station == nullptr || !isatty(_fileno(stdin)))
+    {
+        lua_pushinteger(L, 1); // IDOK
+        return 1;
+    }
     const int result = MessageBoxA(nullptr, caption, title, UINT(options));
     lua_pushinteger(L, result);
     return 1;
