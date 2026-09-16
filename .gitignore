@@ -5,3 +5,6 @@ bin/luau-vm
 .idea/
 bin/*.exe
 todo.md
+build-asan/
+build-dbg/
+build-*/
