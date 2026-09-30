@@ -348,6 +348,14 @@ int getScriptEnvironment(lua_State* L)
     return 1;
 }
 
+int getCallingScript(lua_State* L)
+{
+    // Lumora runs one top-level script per VM state. Its `script` global is
+    // therefore the calling script for executor callbacks in this runtime.
+    lua_getglobal(L, "script");
+    return 1;
+}
+
 int getRawMetatable(lua_State* L)
 {
     luaL_checkany(L, 1);
@@ -381,6 +389,70 @@ int isReadonly(lua_State* L)
     luaL_checktype(L, 1, LUA_TTABLE);
     lua_pushboolean(L, lua_getreadonly(L, 1));
     return 1;
+}
+
+int tableLock(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_setreadonly(L, 1, true);
+    return 0;
+}
+
+int tableUnlock(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_setreadonly(L, 1, false);
+    return 0;
+}
+
+int tableIsLock(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_pushboolean(L, lua_getreadonly(L, 1));
+    return 1;
+}
+
+int consoleOutput(lua_State* L)
+{
+    const int argumentCount = lua_gettop(L);
+    const char* prefix = lua_tostring(L, lua_upvalueindex(2));
+    const bool hasPrefix = prefix && prefix[0] != '\0';
+
+    // Keep the original print function in the closure so console helpers do
+    // not recurse if user code later replaces the global `print`.
+    lua_pushvalue(L, lua_upvalueindex(1));
+    if (hasPrefix)
+        lua_pushstring(L, prefix);
+    for (int index = 1; index <= argumentCount; ++index)
+        lua_pushvalue(L, index);
+    lua_call(L, argumentCount + (hasPrefix ? 1 : 0), 0);
+    return 0;
+}
+
+void registerConsoleFunction(lua_State* L, const char* name, const char* prefix)
+{
+    lua_getglobal(L, "print");
+    if (!lua_isfunction(L, -1))
+    {
+        lua_pop(L, 1);
+        return;
+    }
+    lua_pushstring(L, prefix);
+    lua_pushcclosure(L, consoleOutput, name, 2);
+    lua_setglobal(L, name);
+}
+
+void registerTableExtensions(lua_State* L)
+{
+    lua_getglobal(L, "table");
+    if (lua_istable(L, -1))
+    {
+        const int table = lua_gettop(L);
+        registerFunction(L, table, "lock", tableLock);
+        registerFunction(L, table, "unlock", tableUnlock);
+        registerFunction(L, table, "islock", tableIsLock);
+    }
+    lua_pop(L, 1);
 }
 
 int makeWriteable(lua_State* L)
@@ -759,6 +831,39 @@ int getInstances(lua_State* L)
         {
             lua_pushvalue(L, -2);
             lua_rawseti(L, output, ++result);
+        }
+        lua_pop(L, 1);
+    }
+    return 1;
+}
+
+int getScripts(lua_State* L)
+{
+    lua_getglobal(L, "lumora");
+    lua_getfield(L, -1, "_allInstances");
+    if (!lua_istable(L, -1))
+        return luaL_error(L, "Lumora instance registry is unavailable");
+
+    const int registry = lua_gettop(L);
+    lua_newtable(L);
+    const int output = lua_gettop(L);
+    int result = 0;
+    lua_pushnil(L);
+    while (lua_next(L, registry) != 0)
+    {
+        if (isInstance(L, -2))
+        {
+            lua_getfield(L, -2, "ClassName");
+            const bool isScript = lua_isstring(L, -1) &&
+                (std::strcmp(lua_tostring(L, -1), "Script") == 0 ||
+                 std::strcmp(lua_tostring(L, -1), "LocalScript") == 0 ||
+                 std::strcmp(lua_tostring(L, -1), "ModuleScript") == 0);
+            lua_pop(L, 1);
+            if (isScript)
+            {
+                lua_pushvalue(L, -2);
+                lua_rawseti(L, output, ++result);
+            }
         }
         lua_pop(L, 1);
     }
@@ -1222,6 +1327,12 @@ int isExecutorClosure(lua_State* L)
 
 void registerExecutorCompatibilityGlobals(lua_State* L)
 {
+    registerTableExtensions(L);
+    registerConsoleFunction(L, "console_print", "");
+    registerConsoleFunction(L, "console_iprint", "[INFO]");
+    registerConsoleFunction(L, "console_wprint", "[WARN]");
+    registerConsoleFunction(L, "console_eprint", "[ERR]");
+
     registerFunction(L, LUA_GLOBALSINDEX, "identifyexecutor", identifyExecutor);
     registerFunction(L, LUA_GLOBALSINDEX, "getexecutorname", getExecutorName);
     registerFunction(L, LUA_GLOBALSINDEX, "getgenv", getGlobalEnvironment);
@@ -1242,6 +1353,7 @@ void registerExecutorCompatibilityGlobals(lua_State* L)
 
     registerFunction(L, LUA_GLOBALSINDEX, "getscriptbytecode", compileScriptBytecode);
     registerFunction(L, LUA_GLOBALSINDEX, "decompile", decompileScript);
+    registerFunction(L, LUA_GLOBALSINDEX, "getcallingscript", getCallingScript);
     registerFunction(L, LUA_GLOBALSINDEX, "getscriptclosure", getScriptClosure);
     registerFunction(L, LUA_GLOBALSINDEX, "getupvalues", getUpvalues);
     registerFunction(L, LUA_GLOBALSINDEX, "getconstants", getconstantsImpl);
@@ -1249,6 +1361,7 @@ void registerExecutorCompatibilityGlobals(lua_State* L)
     registerFunction(L, LUA_GLOBALSINDEX, "getcallbackvalue", getCallbackValue);
 
     registerFunction(L, LUA_GLOBALSINDEX, "getinstances", getInstances);
+    registerFunction(L, LUA_GLOBALSINDEX, "getscripts", getScripts);
     registerFunction(L, LUA_GLOBALSINDEX, "getnilinstances", getNilInstances);
     registerFunction(L, LUA_GLOBALSINDEX, "getloadedmodules", getLoadedModules);
     registerFunction(L, LUA_GLOBALSINDEX, "getconnections", getConnections);
@@ -1282,6 +1395,8 @@ void registerExecutorCompatibilityGlobals(lua_State* L)
 
     registerFunction(L, LUA_GLOBALSINDEX, "getthreadidentity", getThreadIdentity);
     registerFunction(L, LUA_GLOBALSINDEX, "setthreadidentity", setThreadIdentity);
+    registerFunction(L, LUA_GLOBALSINDEX, "context_get", getThreadIdentity);
+    registerFunction(L, LUA_GLOBALSINDEX, "context_set", setThreadIdentity);
     registerFunction(L, LUA_GLOBALSINDEX, "getidentity", getThreadIdentity);
     registerFunction(L, LUA_GLOBALSINDEX, "setidentity", setThreadIdentity);
     registerFunction(L, LUA_GLOBALSINDEX, "setfpscap", setFpsCap);

@@ -602,6 +602,8 @@ void registerHostGlobals(lua_State* L)
     registerJsonGlobals(L);
     registerFunction(L, LUA_GLOBALSINDEX, "setclipboard", setClipboard);
     registerFunction(L, LUA_GLOBALSINDEX, "getclipboard", getClipboard);
+    registerFunction(L, LUA_GLOBALSINDEX, "clipboard_set", setClipboard);
+    registerFunction(L, LUA_GLOBALSINDEX, "clipboard_get", getClipboard);
     registerFunction(L, LUA_GLOBALSINDEX, "getcallstack", getCallStack);
 
     lua_getglobal(L, "lumora");

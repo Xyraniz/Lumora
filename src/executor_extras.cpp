@@ -875,6 +875,31 @@ int fireTouchDetector(lua_State* L)
     return 1;
 }
 
+int fireTouchInterest(lua_State* L)
+{
+    if (!isInstance(L, 1) || !isBasePart(L, 1))
+        return luaL_argerror(L, 1, "BasePart expected");
+    if (!isInstance(L, 2) || classNameOf(L, 2) != "TouchTransmitter")
+        return luaL_argerror(L, 2, "TouchTransmitter expected");
+
+    const lua_Integer toggle = luaL_checkinteger(L, 3);
+    if (toggle != 0 && toggle != 1)
+        return luaL_argerror(L, 3, "toggle must be 0 (touch) or 1 (release)");
+
+    const int part = lua_absindex(L, 1);
+    lua_getfield(L, 2, "Parent");
+    if (!isInstance(L, -1) || !isBasePart(L, -1))
+        return luaL_argerror(L, 2, "TouchTransmitter must be parented to a BasePart");
+    const int otherPart = lua_absindex(L, -1);
+    if (lua_rawequal(L, part, otherPart))
+        return luaL_argerror(L, 2, "TouchTransmitter must belong to a different BasePart");
+
+    const char* signal = toggle == 0 ? "Touched" : "TouchEnded";
+    fireInstanceSignal(L, part, signal, otherPart);
+    fireInstanceSignal(L, otherPart, signal, part);
+    return 0;
+}
+
 // ---------------------------------------------------------------------------
 // saveinstance / saveplace / savegame
 // ---------------------------------------------------------------------------
@@ -1128,6 +1153,7 @@ void registerExecutorExtras(lua_State* L)
     registerGlobal(L, "messagebox", messageBox);
     registerGlobal(L, "queue_on_teleport", queueOnTeleport);
     registerGlobal(L, "firetouchdetector", fireTouchDetector);
+    registerGlobal(L, "firetouchinterest", fireTouchInterest);
     registerGlobal(L, "saveinstance", saveInstanceImpl);
     registerGlobal(L, "saveplace", savePlaceImpl);
     registerGlobal(L, "savegame", saveInstanceImpl);
