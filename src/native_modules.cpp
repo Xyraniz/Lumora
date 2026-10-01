@@ -94,6 +94,62 @@ static int cryptoPasswordHash(lua_State* L) { std::string password=checkString(L
 static int cryptoPasswordVerify(lua_State* L) { std::string password=checkString(L,1), encoded=checkString(L,2); lua_pushboolean(L,crypto_pwhash_str_verify(encoded.c_str(),password.data(),password.size())==0); return 1; }
 static int cryptoOpen(lua_State* L) { lua_newtable(L); int t=lua_gettop(L); setfn(L,t,"digest",cryptoDigest); setfn(L,t,"hash",cryptoDigest); setfn(L,t,"hmac",cryptoHmac); setfn(L,t,"randomBytes",cryptoRandom); lua_newtable(L); int b=lua_gettop(L); setfn(L,b,"encode",cryptoBase64Encode); setfn(L,b,"decode",cryptoBase64Decode); lua_setfield(L,t,"base64"); lua_newtable(L); int s=lua_gettop(L); setfn(L,s,"keygen",cryptoSecretboxKeygen); setfn(L,s,"seal",cryptoSecretboxSeal); setfn(L,s,"open",cryptoSecretboxOpen); lua_pushinteger(L,crypto_secretbox_NONCEBYTES); lua_setfield(L,s,"nonceBytes"); lua_pushinteger(L,crypto_secretbox_KEYBYTES); lua_setfield(L,s,"keyBytes"); lua_setfield(L,t,"secretbox"); lua_newtable(L); int p=lua_gettop(L); setfn(L,p,"hash",cryptoPasswordHash); setfn(L,p,"verify",cryptoPasswordVerify); lua_setfield(L,t,"password"); return 1; }
 
+static int executorGenerateBytes(lua_State* L)
+{
+    const lua_Integer size = luaL_checkinteger(L, 1);
+    if (size < 0 || size > 1024 * 1024)
+        return luaL_error(L, "crypt.generatebytes size must be between 0 and 1048576");
+
+    lua_pushcfunction(L, cryptoRandom, "crypt.generatebytes.random");
+    lua_pushinteger(L, size);
+    lua_call(L, 1, 1);
+    lua_pushcfunction(L, cryptoBase64Encode, "crypt.generatebytes.base64");
+    lua_pushvalue(L, -2);
+    lua_call(L, 1, 1);
+    return 1;
+}
+
+static int executorGenerateKey(lua_State* L)
+{
+    lua_pushcfunction(L, cryptoSecretboxKeygen, "crypt.generatekey.random");
+    lua_call(L, 0, 1);
+    lua_pushcfunction(L, cryptoBase64Encode, "crypt.generatekey.base64");
+    lua_pushvalue(L, -2);
+    lua_call(L, 1, 1);
+    return 1;
+}
+
+static int executorCryptHash(lua_State* L)
+{
+    const std::string data = checkString(L, 1);
+    const std::string algorithm = optString(L, 2, "sha384");
+    const EVP_MD* digest = EVP_get_digestbyname(algorithm.c_str());
+    if (!digest)
+        return luaL_error(L, "crypt.hash does not support algorithm '%s'", algorithm.c_str());
+
+    unsigned char output[EVP_MAX_MD_SIZE];
+    unsigned int outputSize = 0;
+    EVP_MD_CTX* context = EVP_MD_CTX_new();
+    if (!context || EVP_DigestInit_ex(context, digest, nullptr) != 1 ||
+        EVP_DigestUpdate(context, data.data(), data.size()) != 1 ||
+        EVP_DigestFinal_ex(context, output, &outputSize) != 1)
+    {
+        EVP_MD_CTX_free(context);
+        return luaL_error(L, "hash failed");
+    }
+    EVP_MD_CTX_free(context);
+
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string encoded(outputSize * 2, '\0');
+    for (unsigned int index = 0; index < outputSize; ++index)
+    {
+        encoded[index * 2] = hex[output[index] >> 4];
+        encoded[index * 2 + 1] = hex[output[index] & 0x0f];
+    }
+    lua_pushlstring(L, encoded.data(), encoded.size());
+    return 1;
+}
+
 // ---------------- HTTP and WebSocket ----------------
 struct CurlBuffer { std::string body; long status=0; };
 static size_t curlWrite(char* ptr,size_t size,size_t nmemb,void* userdata){auto* b=(CurlBuffer*)userdata; b->body.append(ptr,size*nmemb); return size*nmemb;}
@@ -148,3 +204,23 @@ static int returnModule(lua_State* L,const char* name){if(strcmp(name,"@lumora/c
 }
 void registerNativeModules(lua_State*) { static bool initialized=false; if(!initialized){curl_global_init(CURL_GLOBAL_DEFAULT); if(sodium_init()<0) std::abort(); initialized=true;} }
 int requireNativeModule(lua_State* L,const char* name){ if(!name)return 0; if(strncmp(name,"@lumora/",8)!=0)return 0; if(strcmp(name,"@lumora/crypto")==0||strcmp(name,"@lumora/net")==0||strcmp(name,"@lumora/syntax")==0||strcmp(name,"@lumora/vm")==0||strcmp(name,"@lumora/debugger")==0){registerNativeModules(L);return returnModule(L,name);} return 0; }
+
+void registerExecutorCryptoGlobals(lua_State* L, int (*lz4Compress)(lua_State*), int (*lz4Decompress)(lua_State*))
+{
+    registerNativeModules(L);
+    lua_newtable(L);
+    const int crypt = lua_gettop(L);
+    setfn(L, crypt, "base64encode", cryptoBase64Encode);
+    setfn(L, crypt, "base64decode", cryptoBase64Decode);
+    setfn(L, crypt, "base64_encode", cryptoBase64Encode);
+    setfn(L, crypt, "base64_decode", cryptoBase64Decode);
+    setfn(L, crypt, "generatebytes", executorGenerateBytes);
+    setfn(L, crypt, "generatekey", executorGenerateKey);
+    setfn(L, crypt, "hash", executorCryptHash);
+    setfn(L, crypt, "lz4compress", lz4Compress);
+    setfn(L, crypt, "lz4decompress", lz4Decompress);
+    lua_setglobal(L, "crypt");
+
+    setfn(L, LUA_GLOBALSINDEX, "base64_encode", cryptoBase64Encode);
+    setfn(L, LUA_GLOBALSINDEX, "base64_decode", cryptoBase64Decode);
+}

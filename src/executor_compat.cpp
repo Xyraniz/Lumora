@@ -14,6 +14,7 @@
 #include "lualib.h"
 #include "Luau/Compiler.h"
 #include "lumora.h"
+#include "native_modules.h"
 
 #include <openssl/evp.h>
 #include <curl/curl.h>
@@ -1131,7 +1132,8 @@ int httpVerb(lua_State* L, const char* verb)
     lua_pushstring(L, verb);
     lua_setfield(L, options, "Method");
     lua_pushvalue(L, options);
-    lua_remove(L, options);
+    lua_replace(L, 1);
+    lua_settop(L, 1);
     return httpRequest(L);
 }
 
@@ -1143,6 +1145,13 @@ int httpGet(lua_State* L)
 int httpPost(lua_State* L)
 {
     return httpVerb(L, "POST");
+}
+
+int executorHttpGet(lua_State* L)
+{
+    httpVerb(L, "GET");
+    lua_getfield(L, -1, "Body");
+    return 1;
 }
 
 int lz4Compress(lua_State* L)
@@ -1175,6 +1184,21 @@ int lz4Decompress(lua_State* L)
     const int written = LZ4_decompress_safe(input.data(), output.data(), int(input.size()), int(requestedSize));
     if (written < 0 || written != requestedSize)
         return luaL_error(L, "lz4decompress failed: invalid block or uncompressed size");
+    lua_pushlstring(L, output.data(), output.size());
+    return 1;
+}
+
+int lz4DecompressExecutor(lua_State* L)
+{
+    const std::string input = requiredString(L, 1);
+    if (input.size() > size_t(std::numeric_limits<int>::max()))
+        return luaL_error(L, "lz4decompress input exceeds LZ4 size limit");
+
+    std::string output(kMaxDecompressedBytes, '\0');
+    const int written = LZ4_decompress_safe(input.data(), output.data(), int(input.size()), int(output.size()));
+    if (written < 0)
+        return luaL_error(L, "lz4decompress failed: invalid block or output exceeds 67108864 bytes");
+    output.resize(size_t(written));
     lua_pushlstring(L, output.data(), output.size());
     return 1;
 }
@@ -1381,6 +1405,8 @@ void registerExecutorCompatibilityGlobals(lua_State* L)
     registerFunction(L, http, "get", httpGet);
     registerFunction(L, http, "post", httpPost);
     lua_setglobal(L, "http");
+    registerFunction(L, LUA_GLOBALSINDEX, "HttpGet", executorHttpGet);
+    registerFunction(L, LUA_GLOBALSINDEX, "HttpGetAsync", executorHttpGet);
     lua_getglobal(L, "syn");
     if (!lua_istable(L, -1))
     {
@@ -1392,6 +1418,7 @@ void registerExecutorCompatibilityGlobals(lua_State* L)
     lua_setglobal(L, "syn");
     registerFunction(L, LUA_GLOBALSINDEX, "lz4compress", lz4Compress);
     registerFunction(L, LUA_GLOBALSINDEX, "lz4decompress", lz4Decompress);
+    registerExecutorCryptoGlobals(L, lz4Compress, lz4DecompressExecutor);
 
     registerFunction(L, LUA_GLOBALSINDEX, "getthreadidentity", getThreadIdentity);
     registerFunction(L, LUA_GLOBALSINDEX, "setthreadidentity", setThreadIdentity);

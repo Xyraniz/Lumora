@@ -137,9 +137,9 @@ void applySandbox(lua_State* L)
         "getgenv", "getrenv", "hookfunction", "hookmetamethod",
         "getrawmetatable", "setrawmetatable", "getnamecallmethod",
         "setnamecallmethod", "checkcaller", "cloneref", "clonereference",
-        "request", "http_request", "http", "syn", "Drawing", "writefile", "readfile", "isfile",
+        "request", "http_request", "http", "syn", "HttpGet", "HttpGetAsync", "Drawing", "writefile", "readfile", "isfile",
         "isfolder", "makefolder", "delfile", "delfolder", "listfiles",
-        "appendfile", "getconnections", "gethui", "protectgui", "setclipboard",
+        "appendfile", "getconnections", "gethui", "protectgui", "setclipboard", "toclipboard",
         "getclipboard", "clipboard_set", "clipboard_get", "getcallstack", "lumora", "require",
         nullptr};
     for (int i = 0; kDangerousGlobals[i]; ++i)
