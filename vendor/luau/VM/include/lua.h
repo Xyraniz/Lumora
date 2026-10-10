@@ -192,9 +192,20 @@ LUA_API const void* lua_gethookclosure(lua_State* L, int idx);
 // (Lumora) pushes the constants of the Lua function at idx (C closures have
 // none, returns -1); used by getconstants/debug.getconstants
 LUA_API int lua_getfunctionconstants(lua_State* L, int idx);
+// (Lumora) executor-style access to a single constant; returns -1 for C
+// closures, 0 for an invalid index, and 1 when a value was pushed.
+LUA_API int lua_getfunctionconstant(lua_State* L, int idx, int n);
+// (Lumora) writes the value on top of the stack into a function constant;
+// returns -1 for C closures, 0 for an invalid index, and 1 on success.
+LUA_API int lua_setfunctionconstant(lua_State* L, int idx, int n);
 // (Lumora) pushes fresh executable closures for the nested protos of the Lua
 // function at idx (C closures have none, returns -1); used by getprotos
 LUA_API int lua_getfunctionprotos(lua_State* L, int idx);
+// (Lumora) pushes non-callable closures for nested protos, used by debug.getprotos.
+LUA_API int lua_getdebugfunctionprotos(lua_State* L, int idx);
+// (Lumora) pushes an array of currently live closures matching nested proto n;
+// returns -1 for C closures, 0 for an invalid index, and 1 when a table was pushed.
+LUA_API int lua_getactivefunctionprotos(lua_State* L, int idx, int n);
 // (Lumora) pushes a fresh copy of the function at idx (Lua or C closure) that
 // does not pass through any registered detour; hookfunction hands this back
 // as the "old function" so the hook can call the original body

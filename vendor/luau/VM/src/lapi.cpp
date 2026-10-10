@@ -8,6 +8,7 @@
 #include "lstring.h"
 #include "ltable.h"
 #include "lfunc.h"
+#include "lmem.h"
 #include "lgc.h"
 #include "ldo.h"
 #include "ltm.h"
@@ -23,6 +24,7 @@ LUAU_FASTFLAG(LuauDirectFieldGet)
 LUAU_FASTFLAG(LuauGcTraceUdata)
 LUAU_FASTFLAGVARIABLE(LuauManagedDebugNames)
 LUAU_FASTFLAGVARIABLE(LuauNewPointerEncode)
+LUAU_FASTFLAGVARIABLE(LuauPromoteProto)
 
 /*
  * This file contains most implementations of core Lua APIs from lua.h.
@@ -747,7 +749,7 @@ int lua_getfunctionconstants(lua_State* L, int idx)
     if (cl->isC)
         return -1;
 
-    Proto* p = cl->l.p;
+    Proto* p = getproto(cl);
     ensure_stack(L, p->sizek);
     luaC_threadbarrier(L);
     for (int i = 0; i < p->sizek; ++i)
@@ -760,11 +762,9 @@ int lua_getfunctionconstants(lua_State* L, int idx)
     return p->sizek;
 }
 
-// (Lumora) executor-style reflection: pushes fresh closures for every nested
-// proto of the Lua function at index idx; each closure is executable, exactly
-// like debug.getprotos on real executors. Returns the number of protos, or -1
-// when the value is not a Lua function (C closures have no nested protos).
-int lua_getfunctionprotos(lua_State* L, int idx)
+// (Lumora) executor-style constant accessors used by debug.getconstant and
+// debug.setconstant. Indices are 1-based to match Luau executor APIs.
+int lua_getfunctionconstant(lua_State* L, int idx, int n)
 {
     StkId o = index2addr(L, idx);
     api_check(L, ttisfunction(o));
@@ -773,18 +773,145 @@ int lua_getfunctionprotos(lua_State* L, int idx)
     if (cl->isC)
         return -1;
 
-    Proto* p = cl->l.p;
+    Proto* p = getproto(cl);
+    if (n < 1 || n > p->sizek)
+        return 0;
+
+    luaC_threadbarrier(L);
+    ensure_stack(L, 1);
+    setobj2s(L, L->top, &p->k[n - 1]);
+    api_incr_top(L);
+    return 1;
+}
+
+int lua_setfunctionconstant(lua_State* L, int idx, int n)
+{
+    api_checknelems(L, 1);
+    StkId o = index2addr(L, idx);
+    api_check(L, ttisfunction(o));
+
+    Closure* cl = clvalue(o);
+    if (cl->isC)
+        return -1;
+
+    Proto* p = getproto(cl);
+    if (n < 1 || n > p->sizek)
+        return 0;
+
+    TValue* value = L->top - 1;
+    setobj(L, &p->k[n - 1], value);
+    luaC_barrier(L, p, value);
+    L->top--;
+    return 1;
+}
+
+static int pushFunctionProtos(lua_State* L, int idx, bool introspectionOnly)
+{
+    StkId o = index2addr(L, idx);
+    api_check(L, ttisfunction(o));
+
+    Closure* cl = clvalue(o);
+    if (cl->isC)
+        return -1;
+
+    Proto* p = getproto(cl);
     ensure_stack(L, p->sizep);
     luaC_threadbarrier(L);
     for (int i = 0; i < p->sizep; ++i)
     {
         Closure* sub = luaF_newLclosure(L, p->p[i]->nups, L->gt, p->p[i]);
+        sub->protoonly = introspectionOnly ? 1 : 0;
         for (int u = 0; u < p->p[i]->nups; ++u)
             setnilvalue(&sub->l.uprefs[u]);
         setclvalue(L, L->top, sub);
         api_incr_top(L);
     }
     return p->sizep;
+}
+
+// (Lumora) executor-style reflection: pushes fresh closures for every nested
+// proto of the Lua function at index idx. Returns the number of protos, or -1
+// when the value is not a Lua function (C closures have no nested protos).
+int lua_getfunctionprotos(lua_State* L, int idx)
+{
+    return pushFunctionProtos(L, idx, false);
+}
+
+int lua_getdebugfunctionprotos(lua_State* L, int idx)
+{
+    return pushFunctionProtos(L, idx, true);
+}
+
+struct ActiveProtoContext
+{
+    lua_State* L;
+    Proto* proto;
+    int count;
+    int tableIndex;
+    bool write;
+};
+
+static bool sameProtoVersion(Proto* left, Proto* right)
+{
+    for (Proto* candidate = left; candidate; candidate = candidate->optimized)
+        if (candidate == right)
+            return true;
+    for (Proto* candidate = right; candidate; candidate = candidate->optimized)
+        if (candidate == left)
+            return true;
+    return false;
+}
+
+static bool visitActiveProto(void* userdata, lua_Page*, GCObject* object)
+{
+    ActiveProtoContext* context = static_cast<ActiveProtoContext*>(userdata);
+    if (object->gch.tt != LUA_TFUNCTION || isdead(context->L->global, object))
+        return false;
+
+    Closure* cl = gco2cl(object);
+    if (cl->isC || cl->protoonly || !sameProtoVersion(cl->l.p, context->proto))
+        return false;
+
+    if (!context->write)
+    {
+        context->count++;
+        return false;
+    }
+
+    // The result table and one stack slot are reserved before walking the GC
+    // heap, so this visitor does not allocate or invalidate the page walk.
+    lua_State* L = context->L;
+    setclvalue(L, L->top, cl);
+    api_incr_top(L);
+    lua_rawseti(L, context->tableIndex, ++context->count);
+    return false;
+}
+
+int lua_getactivefunctionprotos(lua_State* L, int idx, int n)
+{
+    StkId o = index2addr(L, idx);
+    api_check(L, ttisfunction(o));
+
+    Closure* cl = clvalue(o);
+    if (cl->isC)
+        return -1;
+
+    Proto* parent = getproto(cl);
+    if (n < 1 || n > parent->sizep)
+        return 0;
+
+    ActiveProtoContext countContext{L, parent->p[n - 1], 0, 0, false};
+    luaM_visitgco(L, &countContext, visitActiveProto);
+
+    lua_createtable(L, countContext.count, 0);
+    const int tableIndex = lua_absindex(L, -1);
+    if (!lua_checkstack(L, 1))
+        luaG_runerror(L, "stack overflow");
+
+    ActiveProtoContext writeContext{L, parent->p[n - 1], 0, tableIndex, true};
+    luaC_threadbarrier(L);
+    luaM_visitgco(L, &writeContext, visitActiveProto);
+    return 1;
 }
 // (Lumora) ---------------------------------------------------------------
 
@@ -2301,6 +2428,7 @@ void lua_clonefunction(lua_State* L, int idx)
     api_check(L, isLfunction(p));
     Closure* cl = clvalue(p);
     Closure* newcl = luaF_newLclosure(L, cl->nupvalues, L->gt, cl->l.p);
+    newcl->protoonly = cl->protoonly;
     for (int i = 0; i < cl->nupvalues; ++i)
         setobj2n(L, &newcl->l.uprefs[i], &cl->l.uprefs[i]);
     setclvalue(L, L->top, newcl);
@@ -2334,6 +2462,7 @@ void lua_clonefunctionany(lua_State* L, int idx)
     else
     {
         Closure* newcl = luaF_newLclosure(L, cl->nupvalues, L->gt, cl->l.p);
+        newcl->protoonly = cl->protoonly;
         for (int i = 0; i < cl->nupvalues; ++i)
             setobj2n(L, &newcl->l.uprefs[i], &cl->l.uprefs[i]);
         setclvalue(L, L->top, newcl);

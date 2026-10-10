@@ -465,10 +465,12 @@ typedef struct Closure
     uint8_t stacksize;
     uint8_t preload;
 
-    // (Lumora) nonzero when this closure has an executor-style detour
-    // registered through lua_sethookclosure; lives in the padding bytes
-    // before `gclist` so the struct size is unchanged.
+    // (Lumora) closure flags occupy the padding before `gclist`, keeping the
+    // original struct size unchanged.
     uint8_t hookslot;
+    // (Lumora) nonzero for an introspection-only closure returned by
+    // debug.getproto(s); it can be inspected but never executed.
+    uint8_t protoonly;
 
     GCObject* gclist;
     struct LuaTable* env;

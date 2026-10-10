@@ -3953,6 +3953,9 @@ int luau_precall(lua_State* L, StkId func, int nresults)
 
     Closure* ccl = clvalue(func);
 
+    if (LUAU_UNLIKELY(ccl->protoonly))
+        luaG_runerror(L, "cannot call an inactive function prototype");
+
     // (Lumora) executor-style function detour: when a closure is hooked
     // through lua_sethookclosure, calls that reach it through any reference
     // (registers, upvalues, table fields, C API) are redirected to the hook

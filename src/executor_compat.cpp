@@ -701,6 +701,227 @@ int getUpvalues(lua_State* L)
     return 1;
 }
 
+int pushDebugFunction(lua_State* L, int argument, const char* api)
+{
+    if (lua_isnumber(L, argument))
+    {
+        const lua_Integer level = luaL_checkinteger(L, argument);
+        if (level < 0 || level > std::numeric_limits<int>::max())
+            return luaL_argerror(L, argument, "stack level must be a non-negative integer");
+
+        lua_Debug ar{};
+        if (!lua_getinfo(L, static_cast<int>(level), "f", &ar))
+            return luaL_error(L, "%s: no function at stack level %d", api, static_cast<int>(level));
+    }
+    else
+    {
+        luaL_checktype(L, argument, LUA_TFUNCTION);
+        lua_pushvalue(L, argument);
+    }
+
+    const int function = lua_gettop(L);
+    if (lua_iscfunction(L, function))
+        return luaL_error(L, "%s does not support C closures", api);
+    return function;
+}
+
+int debugGetConstant(lua_State* L)
+{
+    const int function = pushDebugFunction(L, 1, "debug.getconstant");
+    const lua_Integer index = luaL_checkinteger(L, 2);
+    if (index < 1 || index > std::numeric_limits<int>::max())
+        return luaL_argerror(L, 2, "constant index must be a positive integer");
+
+    const int result = lua_getfunctionconstant(L, function, static_cast<int>(index));
+    if (result < 0)
+        return luaL_error(L, "debug.getconstant does not support C closures");
+    if (result == 0)
+        lua_pushnil(L);
+    return 1;
+}
+
+int debugGetConstants(lua_State* L)
+{
+    const int function = pushDebugFunction(L, 1, "debug.getconstants");
+    const int count = lua_getfunctionconstants(L, function);
+    if (count < 0)
+        return luaL_error(L, "debug.getconstants does not support C closures");
+
+    const int firstConstant = lua_gettop(L) - count + 1;
+    lua_createtable(L, count, 0);
+    const int output = lua_absindex(L, -1);
+    for (int i = count; i > 0; --i)
+    {
+        lua_pushvalue(L, firstConstant + i - 1);
+        lua_rawseti(L, output, i);
+    }
+    return 1;
+}
+
+int debugSetConstant(lua_State* L)
+{
+    const int function = pushDebugFunction(L, 1, "debug.setconstant");
+    const lua_Integer index = luaL_checkinteger(L, 2);
+    if (index < 1 || index > std::numeric_limits<int>::max())
+        return luaL_argerror(L, 2, "constant index must be a positive integer");
+    luaL_checkany(L, 3);
+    if (!lua_isnil(L, 3) && !lua_isboolean(L, 3) && !lua_isnumber(L, 3) && !lua_isstring(L, 3))
+        return luaL_argerror(L, 3, "constant must be a number, string, boolean, or nil");
+
+    lua_pushvalue(L, 3);
+    const int result = lua_setfunctionconstant(L, function, static_cast<int>(index));
+    if (result < 0)
+        return luaL_error(L, "debug.setconstant does not support C closures");
+    if (result == 0)
+        return luaL_error(L, "debug.setconstant: no constant at index %d", static_cast<int>(index));
+    return 0;
+}
+
+int debugGetUpvalue(lua_State* L)
+{
+    const int function = pushDebugFunction(L, 1, "debug.getupvalue");
+    const lua_Integer index = luaL_checkinteger(L, 2);
+    if (index < 1 || index > std::numeric_limits<int>::max())
+        return luaL_argerror(L, 2, "upvalue index must be a positive integer");
+
+    if (!lua_getupvalue(L, function, static_cast<int>(index)))
+        return luaL_error(L, "debug.getupvalue: no upvalue at index %d", static_cast<int>(index));
+    return 1;
+}
+
+int debugGetUpvalues(lua_State* L)
+{
+    const int function = pushDebugFunction(L, 1, "debug.getupvalues");
+    lua_newtable(L);
+    const int output = lua_absindex(L, -1);
+    int count = 0;
+    while (lua_getupvalue(L, function, ++count))
+        lua_rawseti(L, output, count);
+    return 1;
+}
+
+int debugSetupValue(lua_State* L)
+{
+    const int function = pushDebugFunction(L, 1, "debug.setupvalue");
+    const lua_Integer index = luaL_checkinteger(L, 2);
+    if (index < 1 || index > std::numeric_limits<int>::max())
+        return luaL_argerror(L, 2, "upvalue index must be a positive integer");
+    luaL_checkany(L, 3);
+
+    lua_pushvalue(L, 3);
+    if (!lua_setupvalue(L, function, static_cast<int>(index)))
+        return luaL_error(L, "debug.setupvalue: no upvalue at index %d", static_cast<int>(index));
+    return 0;
+}
+
+int pushDebugStackFunction(lua_State* L, int level, const char* api)
+{
+    if (level < 0)
+        luaL_argerror(L, 1, "stack level must be a non-negative integer");
+
+    lua_Debug ar{};
+    if (!lua_getinfo(L, level, "f", &ar))
+        return luaL_error(L, "%s: no function at stack level %d", api, level);
+    const int function = lua_gettop(L);
+    if (lua_iscfunction(L, function))
+        return luaL_error(L, "%s does not support C closures", api);
+    return function;
+}
+
+int debugGetStack(lua_State* L)
+{
+    const lua_Integer levelValue = luaL_checkinteger(L, 1);
+    if (levelValue < 0 || levelValue > std::numeric_limits<int>::max())
+        return luaL_argerror(L, 1, "stack level must be a non-negative integer");
+    const int level = static_cast<int>(levelValue);
+    pushDebugStackFunction(L, level, "debug.getstack");
+
+    if (!lua_isnoneornil(L, 2))
+    {
+        const lua_Integer index = luaL_checkinteger(L, 2);
+        if (index < 1 || index > std::numeric_limits<int>::max())
+            return luaL_argerror(L, 2, "stack index must be a positive integer");
+        if (!lua_getlocal(L, level, static_cast<int>(index)))
+            lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L);
+    const int output = lua_absindex(L, -1);
+    for (int index = 1; index <= 256; ++index)
+    {
+        if (!lua_getlocal(L, level, index))
+            break;
+        lua_rawseti(L, output, index);
+    }
+    return 1;
+}
+
+int debugSetStack(lua_State* L)
+{
+    const lua_Integer levelValue = luaL_checkinteger(L, 1);
+    if (levelValue < 0 || levelValue > std::numeric_limits<int>::max())
+        return luaL_argerror(L, 1, "stack level must be a non-negative integer");
+    const lua_Integer index = luaL_checkinteger(L, 2);
+    if (index < 1 || index > std::numeric_limits<int>::max())
+        return luaL_argerror(L, 2, "stack index must be a positive integer");
+    luaL_checkany(L, 3);
+    const int level = static_cast<int>(levelValue);
+    pushDebugStackFunction(L, level, "debug.setstack");
+
+    lua_pushvalue(L, 3);
+    if (!lua_setlocal(L, level, static_cast<int>(index)))
+        return luaL_error(L, "debug.setstack: no stack value at index %d", static_cast<int>(index));
+    return 0;
+}
+
+int debugGetProtos(lua_State* L)
+{
+    const int function = pushDebugFunction(L, 1, "debug.getprotos");
+    const int count = lua_getdebugfunctionprotos(L, function);
+    if (count < 0)
+        return luaL_error(L, "debug.getprotos does not support C closures");
+
+    const int firstProto = lua_gettop(L) - count + 1;
+    lua_createtable(L, count, 0);
+    const int output = lua_absindex(L, -1);
+    for (int i = count; i > 0; --i)
+    {
+        lua_pushvalue(L, firstProto + i - 1);
+        lua_rawseti(L, output, i);
+    }
+    return 1;
+}
+
+int debugGetProto(lua_State* L)
+{
+    const int function = pushDebugFunction(L, 1, "debug.getproto");
+    const lua_Integer index = luaL_checkinteger(L, 2);
+    if (index < 1 || index > std::numeric_limits<int>::max())
+        return luaL_argerror(L, 2, "proto index must be a positive integer");
+
+    if (lua_isnoneornil(L, 3) || !lua_toboolean(L, 3))
+    {
+        const int count = lua_getdebugfunctionprotos(L, function);
+        if (count < 0)
+            return luaL_error(L, "debug.getproto does not support C closures");
+        if (index > count)
+            return luaL_error(L, "debug.getproto: no proto at index %d", static_cast<int>(index));
+        const int proto = lua_gettop(L) - count + static_cast<int>(index);
+        lua_pushvalue(L, proto);
+        return 1;
+    }
+
+    if (!lua_isboolean(L, 3))
+        return luaL_argerror(L, 3, "activated must be a boolean");
+    const int result = lua_getactivefunctionprotos(L, function, static_cast<int>(index));
+    if (result < 0)
+        return luaL_error(L, "debug.getproto does not support C closures");
+    if (result == 0)
+        return luaL_error(L, "debug.getproto: no proto at index %d", static_cast<int>(index));
+    return 1;
+}
+
 int unsupportedVmReflection(lua_State* L)
 {
     return unsupported(L, lua_tostring(L, lua_upvalueindex(1)), "the public Luau VM API does not expose compiled constants or nested protos");
@@ -1348,6 +1569,31 @@ int isExecutorClosure(lua_State* L)
     return 1;
 }
 } // namespace
+
+void registerDebugLibrary(lua_State* L)
+{
+    lua_getglobal(L, "debug");
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setglobal(L, "debug");
+    }
+
+    const int debug = lua_absindex(L, -1);
+    registerFunction(L, debug, "getconstant", debugGetConstant);
+    registerFunction(L, debug, "getconstants", debugGetConstants);
+    registerFunction(L, debug, "setconstant", debugSetConstant);
+    registerFunction(L, debug, "getupvalue", debugGetUpvalue);
+    registerFunction(L, debug, "getupvalues", debugGetUpvalues);
+    registerFunction(L, debug, "setupvalue", debugSetupValue);
+    registerFunction(L, debug, "getstack", debugGetStack);
+    registerFunction(L, debug, "setstack", debugSetStack);
+    registerFunction(L, debug, "getprotos", debugGetProtos);
+    registerFunction(L, debug, "getproto", debugGetProto);
+    lua_pop(L, 1);
+}
 
 void registerExecutorCompatibilityGlobals(lua_State* L)
 {
