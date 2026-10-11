@@ -4,6 +4,7 @@ bin/luau-vm
 .vscode/
 .idea/
 bin/*.exe
+bin/*.dll
 todo.md
 build-asan/
 build-dbg/

@@ -12,6 +12,7 @@
 #include <curl/curl.h>
 #include <sodium.h>
 #include <cerrno>
+#include <cctype>
 #include <cstring>
 #include <cstdlib>
 #include <memory>
@@ -50,6 +51,7 @@ static int sockInitOnce()
     return wsaStatus;
 }
 #else
+#include <dlfcn.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -69,6 +71,178 @@ static void setstr(lua_State* L, int table, const char* name, const std::string&
 static void setbool(lua_State* L, int table, const char* name, bool value) { table = lua_absindex(L, table); lua_pushboolean(L, value); lua_setfield(L, table, name); }
 static std::string checkString(lua_State* L, int i) { size_t n=0; const char* s=luaL_checklstring(L,i,&n); return std::string(s,n); }
 static std::string optString(lua_State* L, int i, const char* d="") { size_t n=0; const char* s=luaL_optlstring(L,i,d,&n); return std::string(s,n); }
+
+// Lune's serde module supports Zstandard compression. Load the same API from
+// the runtime's bundled libzstd so Lumora can provide that compatibility
+// without making Zstandard a new build-time dependency.
+struct ZstdApi
+{
+    using CompressBound = size_t (*)(size_t);
+    using Compress = size_t (*)(void*, size_t, const void*, size_t, int);
+    using Decompress = size_t (*)(void*, size_t, const void*, size_t);
+    using DecompressBound = unsigned long long (*)(const void*, size_t);
+    using IsError = unsigned (*)(size_t);
+    using GetErrorName = const char* (*)(size_t);
+
+    CompressBound compressBound = nullptr;
+    Compress compress = nullptr;
+    Decompress decompress = nullptr;
+    DecompressBound decompressBound = nullptr;
+    IsError isError = nullptr;
+    GetErrorName getErrorName = nullptr;
+};
+
+static void* zstdSymbol(const char* name)
+{
+#if defined(_WIN32)
+    static HMODULE library = []() {
+        HMODULE loaded = GetModuleHandleA("libzstd.dll");
+        return loaded ? loaded : LoadLibraryA("libzstd.dll");
+    }();
+    return library ? reinterpret_cast<void*>(GetProcAddress(library, name)) : nullptr;
+#else
+    static void* library = []() {
+        void* loaded = dlopen("libzstd.so.1", RTLD_NOW | RTLD_LOCAL);
+        return loaded ? loaded : dlopen("libzstd.so", RTLD_NOW | RTLD_LOCAL);
+    }();
+    return library ? dlsym(library, name) : nullptr;
+#endif
+}
+
+static const ZstdApi& zstdApi()
+{
+    static const ZstdApi api = {
+        reinterpret_cast<ZstdApi::CompressBound>(zstdSymbol("ZSTD_compressBound")),
+        reinterpret_cast<ZstdApi::Compress>(zstdSymbol("ZSTD_compress")),
+        reinterpret_cast<ZstdApi::Decompress>(zstdSymbol("ZSTD_decompress")),
+        reinterpret_cast<ZstdApi::DecompressBound>(zstdSymbol("ZSTD_decompressBound")),
+        reinterpret_cast<ZstdApi::IsError>(zstdSymbol("ZSTD_isError")),
+        reinterpret_cast<ZstdApi::GetErrorName>(zstdSymbol("ZSTD_getErrorName")),
+    };
+    return api;
+}
+
+static std::string checkBufferOrString(lua_State* L, int index)
+{
+    if (lua_type(L, index) == LUA_TBUFFER)
+    {
+        size_t size = 0;
+        const char* data = static_cast<const char*>(luaL_checkbuffer(L, index, &size));
+        return std::string(data, size);
+    }
+    return checkString(L, index);
+}
+
+static int zstdCompress(lua_State* L)
+{
+    static constexpr size_t kMaxInput = 64u * 1024u * 1024u;
+    const std::string input = checkBufferOrString(L, 1);
+    if (input.size() > kMaxInput)
+        return luaL_error(L, "Zstandard input exceeds 64 MiB");
+
+    const ZstdApi& api = zstdApi();
+    if (!api.compressBound || !api.compress || !api.isError || !api.getErrorName)
+        return luaL_error(L, "Zstandard library is unavailable beside Lumora");
+
+    const size_t capacity = api.compressBound(input.size());
+    if (capacity > kMaxInput + 1024u * 1024u)
+        return luaL_error(L, "Zstandard output bound exceeds limit");
+    std::string output(capacity, '\0');
+    const size_t written = api.compress(output.data(), output.size(), input.data(), input.size(), 3);
+    if (api.isError(written))
+        return luaL_error(L, "Zstandard compression failed: %s", api.getErrorName(written));
+    output.resize(written);
+    lua_pushlstring(L, output.data(), output.size());
+    return 1;
+}
+
+static int zstdDecompress(lua_State* L)
+{
+    static constexpr size_t kMaxInput = 64u * 1024u * 1024u;
+    static constexpr size_t kMaxOutput = 64u * 1024u * 1024u;
+    const std::string input = checkBufferOrString(L, 1);
+    if (input.size() > kMaxInput)
+        return luaL_error(L, "Zstandard input exceeds 64 MiB");
+
+    const ZstdApi& api = zstdApi();
+    if (!api.decompress || !api.decompressBound || !api.isError || !api.getErrorName)
+        return luaL_error(L, "Zstandard library is unavailable beside Lumora");
+
+    unsigned long long bound = api.decompressBound(input.data(), input.size());
+    if (bound > kMaxOutput)
+        return luaL_error(L, "Zstandard output exceeds 64 MiB");
+    size_t capacity = static_cast<size_t>(bound);
+    std::string output(std::max<size_t>(capacity, 1), '\0');
+    const size_t written = api.decompress(output.data(), capacity, input.data(), input.size());
+    if (api.isError(written))
+        return luaL_error(L, "Zstandard decompression failed: %s", api.getErrorName(written));
+    if (written > kMaxOutput)
+        return luaL_error(L, "Zstandard output exceeds 64 MiB");
+    output.resize(written);
+    lua_pushlstring(L, output.data(), output.size());
+    return 1;
+}
+
+static bool enumItemMatches(lua_State* L, int index, const char* enumName, const char* itemName)
+{
+    index = lua_absindex(L, index);
+    if (!lua_istable(L, index))
+        return false;
+
+    lua_getfield(L, index, "Name");
+    const char* item = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : nullptr;
+    const bool itemMatches = item && std::strcmp(item, itemName) == 0;
+    lua_pop(L, 1);
+
+    lua_getfield(L, index, "EnumType");
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        return false;
+    }
+    lua_getfield(L, -1, "Name");
+    const char* type = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : nullptr;
+    const bool typeMatches = type && std::strcmp(type, enumName) == 0;
+    lua_pop(L, 2);
+    return itemMatches && typeMatches;
+}
+
+static int encodingServiceDecompressBuffer(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    size_t inputSize = 0;
+    luaL_checkbuffer(L, 2, &inputSize);
+    (void)inputSize;
+    if (!enumItemMatches(L, 3, "CompressionAlgorithm", "Zstd"))
+    {
+        luaL_argerror(L, 3, "expected Enum.CompressionAlgorithm.Zstd");
+        return 0;
+    }
+
+    // Reuse Lumora's existing size-capped Zstandard implementation; the
+    // Roblox API returns a buffer while the Lune module returns a string.
+    lua_pushcfunction(L, zstdDecompress, "EncodingService:DecompressBuffer");
+    lua_pushvalue(L, 2);
+    lua_call(L, 1, 1);
+
+    lua_getglobal(L, "buffer");
+    if (!lua_istable(L, -1))
+        return luaL_error(L, "buffer library is unavailable");
+    lua_getfield(L, -1, "fromstring");
+    if (!lua_isfunction(L, -1))
+        return luaL_error(L, "buffer.fromstring is unavailable");
+    lua_pushvalue(L, -3);
+    lua_call(L, 1, 1);
+    return 1;
+}
+
+static int zstdOpen(lua_State* L)
+{
+    lua_newtable(L);
+    setfn(L, -1, "compress", zstdCompress);
+    setfn(L, -1, "decompress", zstdDecompress);
+    return 1;
+}
 
 // ---------------- Crypto ----------------
 static int cryptoDigest(lua_State* L) {
@@ -157,9 +331,64 @@ static int netHttpRequest(lua_State* L) {
     luaL_checktype(L,1,LUA_TTABLE); lua_getfield(L,1,"url"); std::string url=checkString(L,-1); lua_pop(L,1); std::string method="GET", body; lua_getfield(L,1,"method"); if(!lua_isnil(L,-1)) method=checkString(L,-1); lua_pop(L,1); lua_getfield(L,1,"body"); if(!lua_isnil(L,-1)) body=checkString(L,-1); lua_pop(L,1);
     CURL* c=curl_easy_init(); if(!c) return luaL_error(L,"curl initialization failed"); CurlBuffer b; curl_easy_setopt(c,CURLOPT_URL,url.c_str()); curl_easy_setopt(c,CURLOPT_CUSTOMREQUEST,method.c_str()); curl_easy_setopt(c,CURLOPT_WRITEFUNCTION,curlWrite); curl_easy_setopt(c,CURLOPT_WRITEDATA,&b); curl_easy_setopt(c,CURLOPT_FOLLOWLOCATION,1L); curl_easy_setopt(c,CURLOPT_TIMEOUT,30L); curl_easy_setopt(c,CURLOPT_NOSIGNAL,1L); if(!body.empty()) curl_easy_setopt(c,CURLOPT_POSTFIELDS,body.data());
     struct curl_slist* headers=nullptr; lua_getfield(L,1,"headers"); if(lua_istable(L,-1)){lua_pushnil(L); while(lua_next(L,-1)){ if(lua_type(L,-2)==LUA_TSTRING&&lua_type(L,-1)==LUA_TSTRING){std::string h=checkString(L,-2)+": "+checkString(L,-1); headers=curl_slist_append(headers,h.c_str());} lua_pop(L,1);} } lua_pop(L,1); if(headers) curl_easy_setopt(c,CURLOPT_HTTPHEADER,headers);
-    CURLcode rc=curl_easy_perform(c); if(rc==CURLE_OK) curl_easy_getinfo(c,CURLINFO_RESPONSE_CODE,&b.status); if(headers) curl_slist_free_all(headers); curl_easy_cleanup(c); if(rc!=CURLE_OK) return luaL_error(L,"HTTP request failed: %s",curl_easy_strerror(rc)); lua_newtable(L); lua_pushinteger(L,b.status); lua_setfield(L,-2,"status"); setstr(L,lua_gettop(L),"body",b.body); setbool(L,lua_gettop(L),"ok",b.status>=200&&b.status<400); return 1;
+    CURLcode rc=curl_easy_perform(c); if(rc==CURLE_OK) curl_easy_getinfo(c,CURLINFO_RESPONSE_CODE,&b.status); if(headers) curl_slist_free_all(headers); curl_easy_cleanup(c); if(rc!=CURLE_OK) return luaL_error(L,"HTTP request failed: %s",curl_easy_strerror(rc)); lua_newtable(L); lua_pushinteger(L,b.status); lua_setfield(L,-2,"status"); lua_pushinteger(L,b.status); lua_setfield(L,-2,"statusCode"); lua_pushliteral(L,""); lua_setfield(L,-2,"statusMessage"); lua_newtable(L); lua_setfield(L,-2,"headers"); setstr(L,lua_gettop(L),"body",b.body); setbool(L,lua_gettop(L),"ok",b.status>=200&&b.status<400); return 1;
 }
 static int netHttpGet(lua_State* L){lua_newtable(L); lua_pushvalue(L,1); lua_setfield(L,-2,"url"); lua_insert(L,1); return netHttpRequest(L);}
+static int jsonDecodeValue(lua_State* L, int formatIndex, int valueIndex)
+{
+    std::string format = checkString(L, formatIndex);
+    std::transform(format.begin(), format.end(), format.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    if (format != "json") return luaL_error(L, "Lune compatibility supports JSON only");
+    lua_getglobal(L, "json");
+    lua_getfield(L, -1, "decode");
+    lua_pushvalue(L, valueIndex);
+    lua_call(L, 1, 1);
+    return 1;
+}
+static int jsonEncodeValue(lua_State* L, int formatIndex, int valueIndex)
+{
+    std::string format = checkString(L, formatIndex);
+    std::transform(format.begin(), format.end(), format.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    if (format != "json") return luaL_error(L, "Lune compatibility supports JSON only");
+    lua_getglobal(L, "json");
+    lua_getfield(L, -1, "encode");
+    lua_pushvalue(L, valueIndex);
+    lua_call(L, 1, 1);
+    return 1;
+}
+static int netJsonDecode(lua_State* L) { lua_getglobal(L, "json"); lua_getfield(L, -1, "decode"); lua_pushvalue(L, 1); lua_call(L, 1, 1); return 1; }
+static int netJsonEncode(lua_State* L) { lua_getglobal(L, "json"); lua_getfield(L, -1, "encode"); lua_pushvalue(L, 1); lua_call(L, 1, 1); return 1; }
+static int serdeEncode(lua_State* L) { return jsonEncodeValue(L, 1, 2); }
+static int serdeDecode(lua_State* L) { return jsonDecodeValue(L, 1, 2); }
+static int serdeCompress(lua_State* L)
+{
+    std::string algorithm = checkString(L, 1);
+    std::transform(algorithm.begin(), algorithm.end(), algorithm.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    if (algorithm != "zstd") return luaL_error(L, "Lune compatibility supports Zstandard only");
+    lua_pushcfunction(L, zstdCompress, "serde.compress");
+    lua_pushvalue(L, 2);
+    lua_call(L, 1, 1);
+    return 1;
+}
+static int serdeDecompress(lua_State* L)
+{
+    std::string algorithm = checkString(L, 1);
+    std::transform(algorithm.begin(), algorithm.end(), algorithm.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    if (algorithm != "zstd") return luaL_error(L, "Lune compatibility supports Zstandard only");
+    lua_pushcfunction(L, zstdDecompress, "serde.decompress");
+    lua_pushvalue(L, 2);
+    lua_call(L, 1, 1);
+    return 1;
+}
+static int serdeOpen(lua_State* L)
+{
+    lua_newtable(L);
+    setfn(L, -1, "encode", serdeEncode);
+    setfn(L, -1, "decode", serdeDecode);
+    setfn(L, -1, "compress", serdeCompress);
+    setfn(L, -1, "decompress", serdeDecompress);
+    return 1;
+}
 struct Socket { int fd=-1; bool websocket=false; bool serverSide=false; };
 static Socket* checkSocket(lua_State* L,int i){return (Socket*)luaL_checkudata(L,i,"Lumora.Socket");}
 static int socketClose(lua_State* L){auto*s=checkSocket(L,1); if(!sockInvalid(s->fd)&&s->fd>=0){sockClose(s->fd);s->fd=-1;} return 0;}
@@ -170,7 +399,7 @@ static std::string wsAccept(const std::string& key){std::string input=key+"258EA
 static int netWebsocketConnect(lua_State* L){std::string url=checkString(L,1);if(url.rfind("ws://",0)!=0)return luaL_error(L,"only ws:// is supported");std::string rest=url.substr(5),hostport=rest,path="/";size_t slash=rest.find('/');if(slash!=std::string::npos){hostport=rest.substr(0,slash);path=rest.substr(slash);}size_t colon=hostport.rfind(':');if(colon==std::string::npos)return luaL_error(L,"WebSocket URL needs a port");std::string host=hostport.substr(0,colon);int port=std::stoi(hostport.substr(colon+1));if(sockInitOnce()!=0)return luaL_error(L,"socket subsystem initialization failed");int fd=socket(AF_INET,SOCK_STREAM,0);if(sockInvalid(fd))return luaL_error(L,"socket failed");sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port);if(inet_pton(AF_INET,host.c_str(),&a.sin_addr)!=1||connect(fd,(sockaddr*)&a,sizeof(a))<0){sockClose(fd);return luaL_error(L,"WebSocket connect failed");}std::string key="bXlzdGF0aWNrLWtleQ==";std::string request="GET "+path+" HTTP/1.1\r\nHost: "+hostport+"\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: "+key+"\r\nSec-WebSocket-Version: 13\r\n\r\n";send(fd,request.data(),request.size(),0);char response[4096];ssize_t n=recv(fd,response,sizeof(response)-1,0);if(n<0||std::string(response,n).find("101") == std::string::npos){sockClose(fd);return luaL_error(L,"WebSocket handshake failed");}auto*s=(Socket*)lua_newuserdata(L,sizeof(Socket));*s={fd,true,false};luaL_getmetatable(L,"Lumora.Socket");lua_setmetatable(L,-2);return 1;}
 static int netServerListen(lua_State* L){if(sockInitOnce()!=0)return luaL_error(L,"socket subsystem initialization failed");std::string host=optString(L,1,"0.0.0.0");int port=luaL_checkinteger(L,2);luaL_checktype(L,3,LUA_TFUNCTION);int fd=socket(AF_INET,SOCK_STREAM,0);if(sockInvalid(fd))return luaL_error(L,"socket failed");int yes=1;setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(const char*)&yes,sizeof(yes));sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port);a.sin_addr.s_addr=host=="0.0.0.0"?INADDR_ANY:inet_addr(host.c_str());if(bind(fd,(sockaddr*)&a,sizeof(a))<0||listen(fd,8)<0){sockClose(fd);return luaL_error(L,"listen failed: %s",strerror(sockErrno()));}int client=accept(fd,nullptr,nullptr);sockClose(fd);if(sockInvalid(client))return luaL_error(L,"accept failed");char buf[65536];ssize_t n=recv(client,buf,sizeof(buf)-1,0);if(n<0){sockClose(client);return luaL_error(L,"receive failed");}buf[n]=0;lua_newtable(L);lua_pushlstring(L,buf,n);lua_setfield(L,-2,"raw");lua_pushliteral(L,"GET");lua_setfield(L,-2,"method");lua_pushliteral(L,"/");lua_setfield(L,-2,"path");lua_pushvalue(L,3);lua_insert(L,-2);if(lua_pcall(L,1,1,0)!=0){sockClose(client);lua_error(L);return 0;}std::string response=lua_isstring(L,-1)?checkString(L,-1):"";lua_pop(L,1);std::string out="HTTP/1.1 200 OK\r\nContent-Length: "+std::to_string(response.size())+"\r\nConnection: close\r\n\r\n"+response;send(client,out.data(),out.size(),0);sockClose(client);lua_pushboolean(L,1);return 1;}
 static int netServerWebSocket(lua_State* L){if(sockInitOnce()!=0)return luaL_error(L,"socket subsystem initialization failed");std::string host=optString(L,1,"0.0.0.0");int port=luaL_checkinteger(L,2);luaL_checktype(L,3,LUA_TFUNCTION);int fd=socket(AF_INET,SOCK_STREAM,0);if(sockInvalid(fd))return luaL_error(L,"socket failed");int yes=1;setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(const char*)&yes,sizeof(yes));sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port);a.sin_addr.s_addr=host=="0.0.0.0"?INADDR_ANY:inet_addr(host.c_str());if(bind(fd,(sockaddr*)&a,sizeof(a))<0||listen(fd,8)<0){sockClose(fd);return luaL_error(L,"listen failed: %s",strerror(sockErrno()));}int client=accept(fd,nullptr,nullptr);sockClose(fd);if(sockInvalid(client))return luaL_error(L,"accept failed");char buf[8192];ssize_t n=recv(client,buf,sizeof(buf)-1,0);if(n<=0){sockClose(client);return luaL_error(L,"handshake receive failed");}std::string request(buf,n),key="";size_t p=request.find("Sec-WebSocket-Key:");if(p!=std::string::npos){p+=19;while(p<request.size()&&request[p]==' ')p++;size_t e=request.find("\r\n",p);key=request.substr(p,e-p);}if(key.empty()){sockClose(client);return luaL_error(L,"missing WebSocket key");}std::string response="HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "+wsAccept(key)+"\r\n\r\n";send(client,response.data(),response.size(),0);auto*s=(Socket*)lua_newuserdata(L,sizeof(Socket));*s={client,true,true};luaL_getmetatable(L,"Lumora.Socket");lua_setmetatable(L,-2);lua_pushvalue(L,3);lua_insert(L,-2);if(lua_pcall(L,1,0,0)!=0){sockClose(client);lua_error(L);return 0;}lua_pushboolean(L,1);return 1;}
-static int netOpen(lua_State* L){lua_newtable(L);int t=lua_gettop(L);setfn(L,t,"request",netHttpRequest);setfn(L,t,"get",netHttpGet);setfn(L,t,"connect",netConnect);setfn(L,t,"websocketConnect",netWebsocketConnect);lua_newtable(L);int srv=lua_gettop(L);setfn(L,srv,"listen",netServerListen);setfn(L,srv,"listenWebSocket",netServerWebSocket);lua_setfield(L,t,"server");luaL_newmetatable(L,"Lumora.Socket");setfn(L,-1,"send",socketSend);setfn(L,-1,"receive",socketReceive);setfn(L,-1,"close",socketClose);lua_pushvalue(L,-1);lua_setfield(L,-2,"__index");lua_pushcfunction(L,socketClose,"__gc");lua_setfield(L,-2,"__gc");lua_pop(L,1);return 1;}
+static int netOpen(lua_State* L){lua_newtable(L);int t=lua_gettop(L);setfn(L,t,"request",netHttpRequest);setfn(L,t,"get",netHttpGet);setfn(L,t,"jsonDecode",netJsonDecode);setfn(L,t,"jsonEncode",netJsonEncode);setfn(L,t,"connect",netConnect);setfn(L,t,"websocketConnect",netWebsocketConnect);lua_newtable(L);int srv=lua_gettop(L);setfn(L,srv,"listen",netServerListen);setfn(L,srv,"listenWebSocket",netServerWebSocket);lua_setfield(L,t,"server");luaL_newmetatable(L,"Lumora.Socket");setfn(L,-1,"send",socketSend);setfn(L,-1,"receive",socketReceive);setfn(L,-1,"close",socketClose);lua_pushvalue(L,-1);lua_setfield(L,-2,"__index");lua_pushcfunction(L,socketClose,"__gc");lua_setfield(L,-2,"__gc");lua_pop(L,1);return 1;}
 
 // ---------------- Syntax / AST ----------------
 struct CountVisitor : Luau::AstVisitor { int nodes=0, expressions=0, statements=0; std::vector<std::pair<int,int>> locations; bool visit(Luau::AstNode* n) override {nodes++; if(n->asExpr())expressions++; if(n->asStat())statements++; locations.push_back({n->location.begin.line+1,n->location.begin.column+1}); return true;} };
@@ -200,10 +429,34 @@ static int dbgClose(lua_State* L){auto*d=checkDbg(L,1);if(d->L){lua_close(d->L);
 static int dbgCreate(lua_State* L){auto*d=(DebugSession*)lua_newuserdata(L,sizeof(DebugSession));new(d)DebugSession();luaL_getmetatable(L,"Lumora.DebugSession");lua_setmetatable(L,-2);return 1;}
 static int debugOpen(lua_State* L){luaL_newmetatable(L,"Lumora.DebugSession");setfn(L,-1,"setBreakpoint",dbgSetBreakpoint);setfn(L,-1,"start",dbgStart);setfn(L,-1,"continue",dbgContinue);setfn(L,-1,"step",dbgStep);setfn(L,-1,"state",dbgState);setfn(L,-1,"close",dbgClose);lua_pushvalue(L,-1);lua_setfield(L,-2,"__index");lua_pushcfunction(L,dbgClose,"__gc");lua_setfield(L,-2,"__gc");lua_pop(L,1);lua_newtable(L);setfn(L,-1,"create",dbgCreate);return 1;}
 
-static int returnModule(lua_State* L,const char* name){if(strcmp(name,"@lumora/crypto")==0)return cryptoOpen(L);if(strcmp(name,"@lumora/net")==0)return netOpen(L);if(strcmp(name,"@lumora/syntax")==0)return syntaxOpen(L);if(strcmp(name,"@lumora/vm")==0)return vmOpen(L);if(strcmp(name,"@lumora/debugger")==0)return debugOpen(L);return 0;}
+static int returnModule(lua_State* L,const char* name){if(strcmp(name,"@lumora/crypto")==0)return cryptoOpen(L);if(strcmp(name,"@lumora/net")==0||strcmp(name,"@lune/net")==0)return netOpen(L);if(strcmp(name,"@lune/serde")==0)return serdeOpen(L);if(strcmp(name,"@lumora/zstd")==0)return zstdOpen(L);if(strcmp(name,"@lumora/syntax")==0)return syntaxOpen(L);if(strcmp(name,"@lumora/vm")==0)return vmOpen(L);if(strcmp(name,"@lumora/debugger")==0)return debugOpen(L);return 0;}
 }
 void registerNativeModules(lua_State*) { static bool initialized=false; if(!initialized){curl_global_init(CURL_GLOBAL_DEFAULT); if(sodium_init()<0) std::abort(); initialized=true;} }
-int requireNativeModule(lua_State* L,const char* name){ if(!name)return 0; if(strncmp(name,"@lumora/",8)!=0)return 0; if(strcmp(name,"@lumora/crypto")==0||strcmp(name,"@lumora/net")==0||strcmp(name,"@lumora/syntax")==0||strcmp(name,"@lumora/vm")==0||strcmp(name,"@lumora/debugger")==0){registerNativeModules(L);return returnModule(L,name);} return 0; }
+int requireNativeModule(lua_State* L,const char* name){ if(!name)return 0; if(strcmp(name,"@lune/net")==0||strcmp(name,"@lune/serde")==0){registerNativeModules(L);return returnModule(L,name);} if(strncmp(name,"@lumora/",8)!=0)return 0; if(strcmp(name,"@lumora/crypto")==0||strcmp(name,"@lumora/net")==0||strcmp(name,"@lumora/zstd")==0||strcmp(name,"@lumora/syntax")==0||strcmp(name,"@lumora/vm")==0||strcmp(name,"@lumora/debugger")==0){registerNativeModules(L);return returnModule(L,name);} return 0; }
+
+void registerEncodingService(lua_State* L)
+{
+    lua_getglobal(L, "game");
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        return;
+    }
+
+    lua_getfield(L, -1, "GetService");
+    if (!lua_isfunction(L, -1))
+    {
+        lua_pop(L, 2);
+        return;
+    }
+    lua_pushvalue(L, -2);
+    lua_pushliteral(L, "EncodingService");
+    lua_call(L, 2, 1);
+
+    lua_pushcfunction(L, encodingServiceDecompressBuffer, "EncodingService.DecompressBuffer");
+    lua_setfield(L, -2, "DecompressBuffer");
+    lua_pop(L, 2);
+}
 
 void registerExecutorCryptoGlobals(lua_State* L, int (*lz4Compress)(lua_State*), int (*lz4Decompress)(lua_State*))
 {

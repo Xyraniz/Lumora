@@ -24,7 +24,7 @@ LUAU_FASTFLAG(LuauDirectFieldGet)
 LUAU_FASTFLAG(LuauGcTraceUdata)
 LUAU_FASTFLAGVARIABLE(LuauManagedDebugNames)
 LUAU_FASTFLAGVARIABLE(LuauNewPointerEncode)
-LUAU_FASTFLAGVARIABLE(LuauPromoteProto)
+LUAU_FASTFLAG(LuauPromoteProto)
 
 /*
  * This file contains most implementations of core Lua APIs from lua.h.

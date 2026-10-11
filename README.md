@@ -27,7 +27,9 @@ The runtime includes the following surfaces:
 
 - Embedded modules under the `@lumora/` namespace, including filesystem, process, Luau, standard task, Roblox, datetime, serialization, regular-expression, and analysis helpers.
 
-- Native modules for cryptography, networking, syntax inspection, an isolated VM, and a debugger. The exact native module names are `@lumora/crypto`, `@lumora/net`, `@lumora/syntax`, `@lumora/vm`, and `@lumora/debugger`.
+- A limited Lune compatibility layer for the bundled logger engines: `@lune/fs`, `@lune/luau`, `@lune/net`, `@lune/process`, `@lune/serde`, `@lune/stdio`, and `@lune/task`. This is not a general replacement for the full Lune runtime. The compatibility `process.exec` is disabled; JSON and Zstandard are supported by its `serde` adapter.
+
+- Native modules for cryptography, networking, Zstandard, syntax inspection, an isolated VM, and a debugger. Their names are `@lumora/crypto`, `@lumora/net`, `@lumora/zstd`, `@lumora/syntax`, `@lumora/vm`, and `@lumora/debugger`.
 
 - JSON output for script execution, including captured standard output and error, exit status, duration, script path, and timeout state.
 
@@ -83,7 +85,7 @@ The command accepts script arguments after the script path:
 The CLI syntax is:
 
 ```
-lumora [run] [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]
+lumora [run] [--visual] [--no-roblox] [--json] [--sandbox] [--envlogger] [--envlogger-output path] [--timeout seconds] script.lua [args...]
 ```
 
 Useful runtime flags are:
@@ -92,9 +94,21 @@ Useful runtime flags are:
 
 - `--sandbox` applies the runtime's restricted execution environment.
 
+- `--envlogger` executes the script in Lumora's local Luau VM and writes a JSONL log of runtime API calls, instance method calls, instance member reads, and their arguments. It keeps dynamic `loadstring` compilation enabled and logs calls made by generated code. Network requests are logged and stubbed; OS, process, and host filesystem APIs are unavailable; clipboard and host save/teleport side effects are blocked. The emulated file API remains in-memory. A 60-second timeout applies by default; pass `--timeout seconds` to change it.
+
+- `--envlogger-output path` selects the log file. Without it, Lumora writes `<script>.envlogger.jsonl` beside the input script.
+
 - `--json` emits one machine-readable result envelope instead of ordinary runner output.
 
 - `--timeout seconds` applies a non-negative execution timeout.
+
+Example runtime capture:
+
+```bash
+./build/bin/lumora --envlogger --envlogger-output capture.jsonl --timeout 120 path/to/loader.lua
+```
+
+This is execution in Lumora's local compatibility VM, not in Roblox. It records behavior reached in that VM and cannot retrieve a remote stage because external network requests are blocked.
 
 - `--visual` starts the SDL2 visual loop. It cannot be combined with `--json` or `--no-roblox`.
 

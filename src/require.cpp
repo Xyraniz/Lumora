@@ -213,6 +213,49 @@ return M
     if (strcmp(name, "@lumora/analysis") == 0) return "return lumora.analysis\n";
     if (strcmp(name, "@lumora/roblox") == 0)
         return "return {game=game,workspace=workspace,Instance=Instance,Enum=Enum,Vector2=Vector2,Vector3=Vector3,CFrame=CFrame,Color3=Color3,UDim=UDim,UDim2=UDim2,Ray=Ray,Random=Random}\n";
+    // Compatibility surface used by the bundled multi-dumper engines. Keep
+    // process.exec disabled: these loggers use it only for an optional helper
+    // that is not part of the copied engine set.
+    if (strcmp(name, "@lune/fs") == 0)
+        return R"LUMORA(local h = __lumora_host
+local fs = {
+    readFile = h.readFile,
+    writeFile = h.writeFile,
+    readDir = h.readDir,
+    writeDir = h.makeDir,
+    makeDir = h.makeDir,
+    remove = h.remove,
+    removeFile = h.remove,
+    removeDir = h.remove,
+    isFile = h.isFile,
+    isDir = h.isDir,
+    exists = h.exists,
+    copy = h.copy,
+    move = h.move,
+}
+fs.appendFile = function(path, content)
+    local ok, previous = pcall(h.readFile, path)
+    return h.writeFile(path, (ok and previous or "") .. tostring(content or ""))
+end
+return fs
+)LUMORA";
+    if (strcmp(name, "@lune/process") == 0)
+        return R"LUMORA(local h=__lumora_host
+local env=setmetatable({}, {__index=function(_, name) return h.env(name) end})
+return {args=arg,cwd=h.cwd(),env=env,exit=function(code) error({__lumora_process_exit=code or 0}) end,exec=function() return {ok=false,code=127,stdout='',stderr='process execution disabled'} end}
+)LUMORA";
+    if (strcmp(name, "@lune/luau") == 0)
+        return R"LUMORA(local function load(source, options)
+    local debugName = type(options) == 'table' and options.debugName or options
+    if type(debugName) == 'string' then return loadstring(source, debugName) end
+    return loadstring(source)
+end
+return {load=load,compile=load}
+)LUMORA";
+    if (strcmp(name, "@lune/task") == 0)
+        return "return task\n";
+    if (strcmp(name, "@lune/stdio") == 0)
+        return "return {write=function(...) io.write(...) end,print=print,readLine=function() return io.read('*l') end}\n";
     return nullptr;
 }
 
@@ -231,7 +274,7 @@ static int embeddedRequire(lua_State* L)
         return 1;
     if (embeddedModule(name))
     {
-        if (strncmp(name, "@lumora/", 8) == 0)
+        if (strncmp(name, "@lumora/", 8) == 0 || strncmp(name, "@lune/", 6) == 0)
         {
             const char* source = embeddedModule(name);
             Luau::CompileOptions options;

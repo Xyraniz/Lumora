@@ -13,7 +13,9 @@ void applySandbox(lua_State* L);
 void registerCLIGlobals(lua_State* L);
 void registerRequire(lua_State* L);
 void freezeLibraries(lua_State* L);
-int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox, double timeout);
+void installEnvLogger(lua_State* L, const std::string& logPath);
+void finishEnvLogger(lua_State* L);
+int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox, bool envLogger, const char* envLoggerPath, double timeout);
 int runVisual(const char* path, int argc, char** argv, bool sandbox);
 
 // paths.cpp — mirrors the official CLI's normalizePath (CLI/src/FileUtils.cpp)

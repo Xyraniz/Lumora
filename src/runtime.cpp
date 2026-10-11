@@ -2,8 +2,10 @@
 #include "lualib.h"
 #include "Luau/Compiler.h"
 #include "lumora.h"
+#include "native_modules.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -197,7 +199,7 @@ void freezeLibraries(lua_State* L)
     }
 }
 
-int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox, double timeout)
+int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox, bool envLogger, const char* envLoggerPath, double timeout)
 {
     const std::string source = readFile(path);
     lua_State* L = luaL_newstate();
@@ -242,6 +244,7 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
         // touch contacts, message boxes, teleport queue) install last so they
         // replace the explicit-failure placeholders registered above.
         registerExecutorExtras(L);
+        registerEncodingService(L);
         registerRuntimeScript(L, path, source);
     }
     registerEmbeddedHost(L);
@@ -256,7 +259,20 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
     // the user script runs, so the script sees the same read-only surface as
     // the official CLI and real Roblox.
     freezeLibraries(L);
-    if (sandbox)
+    if (envLogger)
+    {
+        try
+        {
+            installEnvLogger(L, envLoggerPath ? envLoggerPath : "envlogger.jsonl");
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << error.what() << "\n";
+            lua_close(L);
+            return 2;
+        }
+    }
+    else if (sandbox)
         applySandbox(L);
     g_timeoutSeconds = timeout;
     g_started = std::chrono::steady_clock::now();
@@ -292,8 +308,61 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
     }
     else
     {
-        const int callStatus = lua_resume(T, NULL, 0);
-        if (callStatus != 0)
+        int callStatus = lua_resume(T, NULL, 0);
+        bool schedulerFailed = false;
+        while (callStatus == LUA_YIELD && roblox)
+        {
+            bool taskWait = false;
+            double elapsed = 0.0;
+            if (lua_gettop(T) > 0 && lua_istable(T, -1))
+            {
+                lua_getfield(T, -1, "__task_wait");
+                taskWait = lua_toboolean(T, -1);
+                lua_pop(T, 1);
+                if (taskWait)
+                {
+                    lua_getfield(T, -1, "duration");
+                    elapsed = lua_tonumber(T, -1);
+                    lua_pop(T, 1);
+                    if (!std::isfinite(elapsed) || elapsed < 0.0)
+                        elapsed = 0.0;
+                }
+            }
+            if (!taskWait)
+                break;
+
+            // Top-level wait() yields the main script coroutine rather than a
+            // task.spawn coroutine, so the normal post-script scheduler cannot
+            // resume it. Advance one virtual scheduler turn, then return the
+            // elapsed wait duration to the suspended script.
+            lua_settop(T, 0);
+            lua_getglobal(L, "task");
+            if (lua_istable(L, -1))
+            {
+                lua_getfield(L, -1, "_step");
+                if (lua_isfunction(L, -1))
+                {
+                    lua_pushnumber(L, elapsed);
+                    if (lua_pcall(L, 1, 0, 0) != 0)
+                    {
+                        reportLuaError(L);
+                        rc = 1;
+                        schedulerFailed = true;
+                    }
+                }
+                else
+                    lua_pop(L, 1);
+                lua_pop(L, 1);
+            }
+            else
+                lua_pop(L, 1);
+            if (schedulerFailed)
+                break;
+
+            lua_pushnumber(T, elapsed);
+            callStatus = lua_resume(T, NULL, 1);
+        }
+        if (!schedulerFailed && callStatus != 0)
         {
             reportLuaError(T);
             rc = 1;
@@ -335,6 +404,8 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
         else
             lua_pop(L, 1);
     }
+    if (envLogger)
+        finishEnvLogger(L);
     lua_close(L);
     return rc;
 }

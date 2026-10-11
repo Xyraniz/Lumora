@@ -31,6 +31,7 @@ add_executable(lumora
     src/main.cpp
     src/prelude.cpp
     src/runtime.cpp
+    src/envlogger.cpp
     src/paths.cpp
     src/require.cpp
     src/json.cpp
@@ -126,6 +127,11 @@ if(BUILD_TESTING)
     add_test(NAME scheduler_real_contract COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/scheduler_real_contract.lua)
     add_test(NAME attached_library_load COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/examples/attached_library.lua)
     add_test(NAME roblox_parity COMMAND $<TARGET_FILE:lumora> ${CMAKE_SOURCE_DIR}/tests/roblox_parity.lua)
+    add_test(NAME envlogger_runtime COMMAND ${CMAKE_COMMAND}
+        -DLUMORA=$<TARGET_FILE:lumora>
+        -DFIXTURE=${CMAKE_SOURCE_DIR}/tests/envlogger_runtime.lua
+        -DLOG=${CMAKE_BINARY_DIR}/envlogger-runtime.jsonl
+        -P ${CMAKE_SOURCE_DIR}/tests/envlogger_contract.cmake)
 
     # These contracts are POSIX shell programs. Register them only where the
     # test runner can execute them; otherwise CTest reports misleading

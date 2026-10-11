@@ -63,8 +63,9 @@ int main(int argc, char** argv)
         if (options.input.empty()) { printAnalyzerHelp(); return 2; }
         return runAnalyzerCommand(command, options);
     }
-    bool roblox = true, json = false, sandbox = false, visual = false;
+    bool roblox = true, json = false, sandbox = false, visual = false, envLogger = false, timeoutSpecified = false;
     double timeout = 0.0;
+    std::string envLoggerOutput;
     std::vector<char*> scriptArgs;
     const char* script = nullptr;
     std::string parseError;
@@ -75,10 +76,13 @@ int main(int argc, char** argv)
         if (option == "--no-roblox") roblox = false;
         else if (option == "--json") json = true;
         else if (option == "--sandbox") sandbox = true;
+        else if (option == "--envlogger") envLogger = true;
+        else if (option == "--envlogger-output" && i + 1 < argc) envLoggerOutput = argv[++i];
         else if (option == "--visual") visual = true;
         else if (option == "--help" || option == "-h")
         {
-            std::cout << "usage: lumora [run] [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
+            std::cout << "usage: lumora [run] [--visual] [--no-roblox] [--json] [--sandbox] [--envlogger] [--envlogger-output path] [--timeout seconds] script.lua [args...]\n";
+            std::cout << "logger compatibility modules v3: @lune/fs(host), @lune/luau, @lune/net, @lune/process, @lune/serde, @lune/stdio, @lune/task\n";
             return 0;
         }
         else if (option == "--version")
@@ -91,6 +95,7 @@ int main(int argc, char** argv)
             try
             {
                 timeout = std::stod(argv[++i]);
+                timeoutSpecified = true;
                 if (!std::isfinite(timeout) || timeout < 0.0) throw std::invalid_argument("timeout must be a finite non-negative number");
             }
             catch (const std::exception& error) { parseError = error.what(); break; }
@@ -106,9 +111,24 @@ int main(int argc, char** argv)
     }
     if (!script)
     {
-        std::cerr << "usage: lumora [run] [--visual] [--no-roblox] [--json] [--sandbox] [--timeout seconds] script.lua [args...]\n";
+        std::cerr << "usage: lumora [run] [--visual] [--no-roblox] [--json] [--sandbox] [--envlogger] [--envlogger-output path] [--timeout seconds] script.lua [args...]\n";
         return 2;
     }
+
+    if (!envLoggerOutput.empty() && !envLogger)
+    {
+        std::cerr << "--envlogger-output requires --envlogger\n";
+        return 2;
+    }
+    if (envLogger && visual)
+    {
+        std::cerr << "--envlogger cannot be combined with --visual\n";
+        return 2;
+    }
+    if (envLogger && !timeoutSpecified)
+        timeout = 60.0;
+    if (envLogger && envLoggerOutput.empty())
+        envLoggerOutput = std::string(script) + ".envlogger.jsonl";
 
     // Emit a single-level JSON result with an enriched schema. Every error
     // path (missing file, compile error, runtime error, timeout, signal) uses
@@ -186,7 +206,7 @@ int main(int argc, char** argv)
                 FILE* out = fopen(outPath.c_str(), "w"); FILE* err = fopen(errPath.c_str(), "w");
                 if (out) { dup2(fileno(out), STDOUT_FILENO); fclose(out); }
                 if (err) { dup2(fileno(err), STDERR_FILENO); fclose(err); }
-                int rc = runScript(script, int(runArgs.size()), runArgs.data(), roblox, sandbox, timeout);
+                int rc = runScript(script, int(runArgs.size()), runArgs.data(), roblox, sandbox, envLogger, envLogger ? envLoggerOutput.c_str() : nullptr, timeout);
                 std::cout.flush(); std::cerr.flush(); _exit(rc);
             }
             int status = 0; bool killed = false;
@@ -237,7 +257,7 @@ int main(int argc, char** argv)
             std::string capturedError;
             try
             {
-                code = runScript(script, int(runArgs.size()), runArgs.data(), roblox, sandbox, timeout);
+                code = runScript(script, int(runArgs.size()), runArgs.data(), roblox, sandbox, envLogger, envLogger ? envLoggerOutput.c_str() : nullptr, timeout);
             }
             catch (const std::exception& e)
             {
@@ -266,7 +286,7 @@ int main(int argc, char** argv)
         }
 #endif
         // Non-JSON mode: run directly and return the script's exit code.
-        return runScript(script, int(runArgs.size()), runArgs.data(), roblox, sandbox, timeout);
+        return runScript(script, int(runArgs.size()), runArgs.data(), roblox, sandbox, envLogger, envLogger ? envLoggerOutput.c_str() : nullptr, timeout);
     }
     catch (const std::exception& error)
     {
