@@ -525,9 +525,9 @@ void installEnvLogger(lua_State* L, const std::string& logPath)
     restoreSafeGlobals(L, saved, safe);
     lua_pop(L, 1);
 
-    // Never expose introspection hooks or host-backed side effects during an
-    // envlogger run. The remaining file API above is implemented in memory.
-    lua_pushnil(L); lua_setglobal(L, "debug");
+    // Keep Luau's native debug functions and Lumora's registered reflection
+    // helpers available for compatibility checks. Host-backed side effects
+    // remain blocked during an envlogger run; the file API above is in memory.
     const char* denied[] = {
         "setclipboard", "toclipboard", "getclipboard", "clipboard_set", "clipboard_get",
         "saveinstance", "saveplace", "savegame", "queue_on_teleport", "messagebox", nullptr

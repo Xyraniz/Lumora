@@ -206,10 +206,11 @@ int runScript(const char* path, int argc, char** argv, bool roblox, bool sandbox
     if (!L) { std::cerr << "failed to create Luau state\n"; return 70; }
     luaL_openlibs(L);
 
-    // Keep Luau's built-in info/traceback functions in every mode. The
-    // executor-style reflection extensions are intentionally absent from the
-    // restricted sandbox, where they could mutate another function's state.
-    if (!sandbox)
+    // Keep Luau's built-in info/traceback functions in every mode. Lumora's
+    // executor-style reflection extensions are available in normal and
+    // envlogger compatibility runs, but remain absent from a standalone
+    // restricted sandbox.
+    if (!sandbox || envLogger)
         registerDebugLibrary(L);
 
     // The official Luau CLI registers loadstring and collectgarbage as
